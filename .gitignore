@@ -1,8 +1,70 @@
-venv/
+# ==========================
+# PYTHON
+# ==========================
+
 __pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Virtual Environment
+venv/
+.venv/
+
+# ==========================
+# ENVIRONMENT VARIABLES
+# ==========================
+
 .env
+
+# ==========================
+# DATABASE
+# ==========================
+
+*.db
+*.sqlite3
+
+# PostgreSQL dump
+*.sql
+
+# ==========================
+# LOGS
+# ==========================
+
+*.log
+
+# ==========================
+# IDE / EDITORS
+# ==========================
+
 .vscode/
+.idea/
+
+# ==========================
+# NODE / FRONTEND
+# ==========================
+
 node_modules/
 dist/
-*.pyc
-*.log
+build/
+
+# ==========================
+# GENERATED REPORTS
+# ==========================
+
+reports/*.pdf
+
+# ==========================
+# TEMP ANALYSIS FILES
+# ==========================
+
+temp_repositories/
+
+# ==========================
+# OS FILES
+# ==========================
+
+.DS_Store
+Thumbs.db
+desktop.ini
