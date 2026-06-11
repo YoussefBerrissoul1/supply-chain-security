@@ -13,8 +13,10 @@ GESTION D'ERREURS :
 """
 
 import logging
+import os
 import re
 import shutil
+import stat
 import time
 from pathlib import Path
 
@@ -100,6 +102,29 @@ class GitHubAnalyzerError(Exception):
     pass
 
 
+def _force_remove_readonly(func, path, excinfo) -> None:
+    """
+    Handler pour shutil.rmtree sur Windows.
+
+    Problème Windows : Git marque certains fichiers dans .git/ en lecture
+    seule (read-only). shutil.rmtree échoue alors avec PermissionError.
+
+    Solution : quand rmtree rencontre une erreur de permission, on enlève
+    l'attribut read-only avec os.chmod puis on réessaie la suppression.
+
+    Paramètres (imposés par shutil.rmtree) :
+        func : la fonction qui a échoué (os.unlink ou os.rmdir)
+        path : le chemin du fichier bloqué
+        excinfo : les infos de l'exception
+    """
+    try:
+        # Enlever l'attribut read-only (0o777 = tous les droits)
+        os.chmod(path, stat.S_IWRITE)
+        func(path)  # Réessayer la suppression
+    except Exception:
+        pass  # Si ça échoue encore, on ignore (le finally s'occupera du reste)
+
+
 # ==============================================================
 # FONCTION : VALIDER L'URL GITHUB
 # ==============================================================
@@ -173,19 +198,19 @@ def clone_repository(repo_url: str) -> Path:
     if clone_path.exists():
         logger.info("Nettoyage du dossier existant : %s", clone_path)
         try:
-            shutil.rmtree(clone_path)
-        except PermissionError as e:
-            # Cas : antivirus ou processus qui bloque le dossier
+            # Sur Windows, les fichiers .git sont en read-only → on utilise
+            # _force_remove_readonly comme handler pour les débloquer avant suppression
+            shutil.rmtree(clone_path, onexc=_force_remove_readonly)
+        except Exception as e:
+            # Dernière tentative — ignore toutes les erreurs restantes
             logger.warning(
-                "Permission refusée lors du nettoyage de %s : %s. Tentative forcée...",
-                clone_path, e,
+                "Nettoyage difficile de %s : %s. Nouvelle tentative...", clone_path, e
             )
-            # Deuxième tentative avec ignore_errors
             shutil.rmtree(clone_path, ignore_errors=True)
             if clone_path.exists():
                 raise GitHubAnalyzerError(
                     f"Impossible de supprimer le dossier existant '{clone_path}'. "
-                    f"Un antivirus ou un autre programme le bloque peut-être."
+                    f"Fermez les programmes qui pourraient l'utiliser et réessayez."
                 ) from e
 
     # --- Étape 4 : Cloner avec timeout ---
@@ -344,18 +369,17 @@ def cleanup_repository(repo_path: Path) -> None:
         return
 
     try:
-        shutil.rmtree(repo_path)
+        # Utiliser le handler Windows pour les fichiers .git en read-only
+        shutil.rmtree(repo_path, onexc=_force_remove_readonly)
         logger.info("Dossier nettoyé : %s", repo_path)
-    except PermissionError:
-        # Deuxième tentative — parfois Windows garde un handle sur .git
-        logger.warning("Permission refusée, tentative forcée pour %s", repo_path)
+    except Exception:
+        # Deuxième tentative — ignore toutes les erreurs (nettoyage best-effort)
+        logger.warning("Nettoyage difficile pour %s, tentative forcée...", repo_path)
         shutil.rmtree(repo_path, ignore_errors=True)
         if repo_path.exists():
             logger.error("ÉCHEC du nettoyage de %s — à supprimer manuellement", repo_path)
         else:
             logger.info("Nettoyage forcé réussi : %s", repo_path)
-    except OSError as e:
-        logger.error("Erreur lors du nettoyage de %s : %s", repo_path, e)
         # On ne propage PAS l'erreur — le nettoyage ne doit pas bloquer l'analyse
 
 
