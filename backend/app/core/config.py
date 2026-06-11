@@ -37,8 +37,21 @@ class Settings(BaseSettings):
     # --- Outils de sécurité ---
     TRIVY_PATH: str = "trivy"
 
+    # --- APIs de vulnérabilités ---
+    # OSV API : gratuite, pas de clé requise (prioritaire)
+    OSV_API_URL: str = "https://api.osv.dev/v1/query"
+    # NVD API : gratuite mais limitée à 5 req/30s sans clé, 50 req/30s avec clé
+    NVD_API_URL: str = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+    NVD_API_KEY: str = ""  # Optionnel mais recommandé (inscription gratuite sur nvd.nist.gov)
+
+    # --- Timeouts HTTP (en secondes) ---
+    HTTP_TIMEOUT: int = 30          # Timeout par requête individuelle
+    CVE_MAX_CONCURRENT: int = 5     # Nombre de requêtes simultanées max (éviter le rate limit)
+
     # --- IA ---
     GEMINI_API_KEY: str = ""
+    OPENROUTER_API_KEY: str = ""
+    AI_PROVIDER: str = "gemini"     # "gemini" ou "openrouter"
 
     # --- Rapports ---
     REPORT_OUTPUT_DIR: str = "./reports"
