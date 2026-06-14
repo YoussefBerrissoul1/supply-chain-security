@@ -212,42 +212,24 @@ class ScoreResult:
 
 def _compute_cve_penalties(
     cve_results: dict[str, list[VulnerabilityResult]],
+    dependencies: Optional[list[DependencyInfo]] = None,
 ) -> tuple[list[PenaltyLine], dict[str, int], int]:
     """
-    Calcule les pénalités dues aux CVE détectées.
-
-    Algorithme :
-        1. Compter les CVE par sévérité (en dédupliquant par CVE ID)
-        2. Appliquer la pénalité unitaire × count
-        3. Plafonner chaque catégorie
-
-    Note sur la déduplication :
-        Un même CVE peut apparaître dans plusieurs dépendances.
-        On compte le nombre unique de CVE ID par sévérité pour éviter
-        de pénaliser plusieurs fois le même problème.
-
-    Paramètres :
-        cve_results : dict retourné par cve_service.scan_all_vulnerabilities()
-
-    Retourne :
-        tuple(penalties, cve_counts_by_severity, total_cve)
+    Calcule les pénalités CVE en utilisant la matrice de risque 3D :
+    Risque = Sévérité (Base) × Exploitabilité × Impact
     """
-
-    # Déduplication : un CVE ID unique par sévérité
-    # { "CVE-2023-001": "CRITICAL", "CVE-2023-002": "HIGH", ... }
-    unique_cves: dict[str, Severity] = {}
-
+    # Déduplication des vulnérabilités pour éviter de compter plusieurs fois le même CVE ID
+    unique_cves: dict[str, tuple[VulnerabilityResult, str]] = {}
     for dep_key, vulns in cve_results.items():
         for vuln in vulns:
             if vuln.cve_id not in unique_cves:
-                unique_cves[vuln.cve_id] = vuln.severity
+                unique_cves[vuln.cve_id] = (vuln, dep_key)
             else:
-                # Si le même CVE est trouvé avec des sévérités différentes,
-                # garder la plus élevée (cas rare mais possible selon la source)
-                existing = unique_cves[vuln.cve_id]
+                # Si doublon, garder la version la plus sévère
+                existing_vuln, _ = unique_cves[vuln.cve_id]
                 severity_order = [Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM, Severity.LOW, Severity.NONE]
-                if severity_order.index(vuln.severity) < severity_order.index(existing):
-                    unique_cves[vuln.cve_id] = vuln.severity
+                if severity_order.index(vuln.severity) < severity_order.index(existing_vuln.severity):
+                    unique_cves[vuln.cve_id] = (vuln, dep_key)
 
     # Compter par sévérité
     counts = {
@@ -257,66 +239,90 @@ def _compute_cve_penalties(
         "LOW":      0,
         "NONE":     0,
     }
-    for cve_id, severity in unique_cves.items():
-        counts[severity.value] = counts.get(severity.value, 0) + 1
-
-    total_cve = sum(counts.values())
+    
     penalties: list[PenaltyLine] = []
+    total_cve = len(unique_cves)
 
-    # --- CRITICAL ---
-    if counts["CRITICAL"] > 0:
-        raw = counts["CRITICAL"] * PENALTY_CRITICAL
-        applied = min(raw, CAP_CRITICAL)
+    for cve_id, (vuln, dep_key) in unique_cves.items():
+        counts[vuln.severity.value] = counts.get(vuln.severity.value, 0) + 1
+
+        # 1. Base penalty (Sévérité)
+        if vuln.severity == Severity.CRITICAL:
+            base_penalty = PENALTY_CRITICAL
+        elif vuln.severity == Severity.HIGH:
+            base_penalty = PENALTY_HIGH
+        elif vuln.severity == Severity.MEDIUM:
+            base_penalty = PENALTY_MEDIUM
+        else:
+            continue  # LOW / NONE -> pas de pénalité directe
+
+        # Trouver si la dépendance est dev
+        is_dev_dep = False
+        if dependencies:
+            for dep in dependencies:
+                if f"{dep.name}@{dep.version}" == dep_key:
+                    is_dev_dep = dep.is_dev
+                    break
+
+        # 2. Multiplicateur d'exploitabilité
+        exploit_mult = 1.0
+        if vuln.exploit_available:
+            exploit_mult *= 1.5
+
+        age_months = None
+        if vuln.published_date:
+            try:
+                # format attendu: YYYY-MM-...
+                pub_year = int(vuln.published_date[:4])
+                pub_month = int(vuln.published_date[5:7])
+                # Date de référence du projet : juin 2026
+                age_months = (2026 - pub_year) * 12 + (6 - pub_month)
+            except Exception:
+                pass
+
+        if age_months is None and vuln.cve_id.startswith("CVE-"):
+            try:
+                cve_year = int(vuln.cve_id.split("-")[1])
+                if cve_year == 2026:
+                    age_months = 3
+                else:
+                    age_months = (2026 - cve_year) * 12
+            except Exception:
+                pass
+
+        if age_months is not None:
+            if age_months < 6:
+                exploit_mult *= 1.3
+            elif age_months > 24 and not vuln.fixed_version:
+                exploit_mult *= 1.2
+
+        if vuln.fixed_version and vuln.fixed_version != "unknown":
+            exploit_mult *= 1.4
+
+        # 3. Multiplicateur d'impact
+        impact_mult = 0.5 if is_dev_dep else 1.3
+
+        # Calcul final
+        final_penalty = base_penalty * exploit_mult * impact_mult
+        final_penalty = round(final_penalty, 2)
+
+        category_text = f"CVE {vuln.severity.value} ({cve_id}) sur {dep_key}"
+        if is_dev_dep:
+            category_text += " [DEV]"
+
         penalties.append(PenaltyLine(
-            category="CVE CRITICAL (CVSS >= 9.0)",
-            count=counts["CRITICAL"],
-            unit_penalty=PENALTY_CRITICAL,
-            raw_penalty=raw,
-            applied=applied,
-            cap=CAP_CRITICAL,
+            category=category_text,
+            count=1,
+            unit_penalty=base_penalty,
+            raw_penalty=final_penalty,
+            applied=final_penalty,
+            cap=0.0
         ))
-        logger.info(
-            "Pénalité CVE CRITICAL : %d × %.0f = %.0f (plafonné à %.0f) → appliqué : %.0f",
-            counts["CRITICAL"], PENALTY_CRITICAL, raw, CAP_CRITICAL, applied,
-        )
 
-    # --- HIGH ---
-    if counts["HIGH"] > 0:
-        raw = counts["HIGH"] * PENALTY_HIGH
-        applied = min(raw, CAP_HIGH)
-        penalties.append(PenaltyLine(
-            category="CVE HIGH (CVSS 7.0-8.9)",
-            count=counts["HIGH"],
-            unit_penalty=PENALTY_HIGH,
-            raw_penalty=raw,
-            applied=applied,
-            cap=CAP_HIGH,
-        ))
         logger.info(
-            "Pénalité CVE HIGH : %d × %.0f = %.0f (plafonné à %.0f) → appliqué : %.0f",
-            counts["HIGH"], PENALTY_HIGH, raw, CAP_HIGH, applied,
+            "Pénalité Matrix 3D pour %s : Base=%.1f × Exploit=%.2f × Impact=%.2f → -%.2f pts",
+            cve_id, base_penalty, exploit_mult, impact_mult, final_penalty
         )
-
-    # --- MEDIUM ---
-    if counts["MEDIUM"] > 0:
-        raw = counts["MEDIUM"] * PENALTY_MEDIUM
-        applied = min(raw, CAP_MEDIUM)
-        penalties.append(PenaltyLine(
-            category="CVE MEDIUM (CVSS 4.0-6.9)",
-            count=counts["MEDIUM"],
-            unit_penalty=PENALTY_MEDIUM,
-            raw_penalty=raw,
-            applied=applied,
-            cap=CAP_MEDIUM,
-        ))
-        logger.info(
-            "Pénalité CVE MEDIUM : %d × %.0f = %.0f (plafonné à %.0f) → appliqué : %.0f",
-            counts["MEDIUM"], PENALTY_MEDIUM, raw, CAP_MEDIUM, applied,
-        )
-
-    # LOW et NONE → pas de pénalité directe (signalées mais pas déduites)
-    if counts["LOW"] > 0:
-        logger.info("CVE LOW : %d trouvées — informatives, pas de pénalité directe", counts["LOW"])
 
     return penalties, counts, total_cve
 
@@ -354,15 +360,19 @@ def _compute_docker_penalties(
     severe_docker = critical_docker + high_docker
 
     if severe_docker > 0:
-        # Pénalité progressive : 10 pts par tranche de 10 vulns sévères
-        tranche_count = max(1, (severe_docker + 9) // 10)  # arrondi supérieur
-        raw = tranche_count * PENALTY_DOCKER_VULN
-        applied = min(raw, CAP_DOCKER_VULN)
+        # Nouvelle logique progressive validée par l'utilisateur
+        if severe_docker <= 5:
+            applied = 10.0
+        elif severe_docker <= 15:
+            applied = 15.0
+        else:
+            applied = 20.0  # Plafond max
+            
         penalties.append(PenaltyLine(
             category=f"Image Docker vulnérable ({severe_docker} CRITICAL+HIGH dans l'OS)",
             count=severe_docker,
-            unit_penalty=PENALTY_DOCKER_VULN,
-            raw_penalty=raw,
+            unit_penalty=applied,
+            raw_penalty=applied,
             applied=applied,
             cap=CAP_DOCKER_VULN,
         ))
@@ -485,7 +495,7 @@ def compute_security_score(
     all_penalties: list[PenaltyLine] = []
 
     # --- Calcul pénalités CVE ---
-    cve_penalties, cve_counts, total_cve = _compute_cve_penalties(cve_results)
+    cve_penalties, cve_counts, total_cve = _compute_cve_penalties(cve_results, dependencies)
     all_penalties.extend(cve_penalties)
 
     # --- Calcul pénalités Docker ---

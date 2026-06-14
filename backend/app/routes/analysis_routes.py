@@ -53,6 +53,7 @@ def create_analysis(
         repo_url=repo_url_str,
         repo_name=repo_name,
         status=AnalysisStatus.PENDING,
+        scan_type=request.scan_type,
     )
     db.add(analysis)
     db.commit()

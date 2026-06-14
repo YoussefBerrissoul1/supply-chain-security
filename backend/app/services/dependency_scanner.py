@@ -55,6 +55,7 @@ class DependencyInfo:
     version: str
     ecosystem: str
     source_file: str = field(default="")
+    is_dev: bool = False
 
     def __post_init__(self) -> None:
         """Normalise les valeurs après création."""
@@ -285,11 +286,14 @@ def parse_package_json(file_path: Path) -> list[DependencyInfo]:
             else:
                 clean_version = "unknown"
 
+            is_dev_dep = (section == "devDependencies")
+
             dep = DependencyInfo(
                 name=pkg_name,
                 version=clean_version,
                 ecosystem="nodejs",
                 source_file=file_path.name,
+                is_dev=is_dev_dep,
             )
 
             if dep.is_valid():

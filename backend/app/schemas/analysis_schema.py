@@ -23,6 +23,11 @@ class AnalysisRequest(BaseModel):
         description="URL complète du dépôt GitHub à analyser",
         examples=["https://github.com/fastapi/fastapi"],
     )
+    scan_type: str = Field(
+        default="standard",
+        description="Type de scan : standard (rapide via OSV) ou deep (complet via NVD)",
+        examples=["standard", "deep"],
+    )
 
 
 # ============================================================
@@ -98,6 +103,7 @@ class AnalysisListResponse(BaseModel):
     repo_name: str
     status: str
     security_score: float | None = None
+    scan_type: str
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -113,6 +119,7 @@ class AnalysisDetailResponse(BaseModel):
     repo_name: str
     status: str
     security_score: float | None = None
+    scan_type: str
     created_at: datetime
     dependencies: list[DependencyResponse] = []
     docker_result: DockerResultResponse | None = None

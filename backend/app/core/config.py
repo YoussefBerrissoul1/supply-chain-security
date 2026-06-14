@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     DB_PORT: int = 5432
     DB_NAME: str = "supply_chain_security"
     DB_USER: str = "postgres"
-    DB_PASSWORD: str = "momo12"
+    DB_PASSWORD: str = "postgres"
 
     # --- GitHub ---
     CLONE_DIRECTORY: str = "./temp_repositories"

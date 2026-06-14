@@ -24,6 +24,7 @@ class Dependency(Base):
     version: Mapped[str] = mapped_column(String(100), nullable=False)
     ecosystem: Mapped[str] = mapped_column(String(50), nullable=False)
     is_outdated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_dev: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # --- Relations ---
     analysis = relationship("Analysis", back_populates="dependencies")

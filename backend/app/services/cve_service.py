@@ -140,6 +140,8 @@ class VulnerabilityResult:
     description:   str
     source:        str = "OSV"
     fixed_version: str | None = None
+    exploit_available: bool = False
+    published_date: str | None = None
 
     def to_dict(self) -> dict:
         """Sérialise en dict pour le stockage en base ou les logs."""
@@ -150,6 +152,8 @@ class VulnerabilityResult:
             "description":   self.description,
             "source":        self.source,
             "fixed_version": self.fixed_version,
+            "exploit_available": self.exploit_available,
+            "published_date": self.published_date,
         }
 
 
@@ -396,6 +400,17 @@ def query_osv(dep: DependencyInfo) -> list[VulnerabilityResult]:
         # Extraire la version corrigée si disponible
         fixed_version = _extract_fixed_version_from_osv(vuln, osv_ecosystem, dep.name)
 
+        # Extraire la date et vérifier si un exploit public est disponible
+        published_date = vuln.get("published")
+        exploit_available = False
+        references = vuln.get("references", [])
+        exploit_keywords = ["exploit", "exploit-db", "exploit-database", "packetstormsecurity", "0day", "poc"]
+        for ref in references:
+            url = ref.get("url", "").lower()
+            if any(keyword in url for keyword in exploit_keywords):
+                exploit_available = True
+                break
+
         result = VulnerabilityResult(
             cve_id=cve_id,
             cvss_score=cvss_score,
@@ -403,6 +418,8 @@ def query_osv(dep: DependencyInfo) -> list[VulnerabilityResult]:
             description=description,
             source="OSV",
             fixed_version=fixed_version,
+            exploit_available=exploit_available,
+            published_date=published_date,
         )
 
         results.append(result)
@@ -643,12 +660,28 @@ def query_nvd_by_cve_id(cve_id: str) -> VulnerabilityResult | None:
     cvss_score, severity_str = _extract_cvss_from_nvd(cve_data)
     description = _extract_description_from_nvd(cve_data)
 
+    # Extraire la date et l'exploitabilité depuis NVD
+    published_date = cve_data.get("published")
+    exploit_available = False
+    references = cve_data.get("references", [])
+    for ref in references:
+        tags = ref.get("tags", [])
+        if "Exploit" in tags:
+            exploit_available = True
+            break
+        url = ref.get("url", "").lower()
+        if any(keyword in url for keyword in ["exploit-db", "exploit-database", "packetstormsecurity"]):
+            exploit_available = True
+            break
+
     return VulnerabilityResult(
         cve_id=cve_id,
         cvss_score=cvss_score,
         severity=cvss_to_severity(cvss_score),
         description=description,
         source="NVD",
+        exploit_available=exploit_available,
+        published_date=published_date,
     )
 
 
@@ -693,6 +726,7 @@ def _extract_description_from_nvd(cve_data: dict) -> str:
 
 def scan_all_vulnerabilities(
     dependencies: list[DependencyInfo],
+    scan_type: str = "standard",
 ) -> dict[str, list[VulnerabilityResult]]:
     """
     Fonction principale du service CVE.
@@ -723,7 +757,8 @@ def scan_all_vulnerabilities(
     failed_queries = 0
 
     logger.info(
-        "Démarrage du scan CVE pour %d dépendance(s)...",
+        "Démarrage du scan CVE (%s) pour %d dépendance(s)...",
+        scan_type.upper(),
         len(dependencies),
     )
 
@@ -744,20 +779,25 @@ def scan_all_vulnerabilities(
             # --- Interroger OSV (source principale) ---
             osv_results = query_osv(dep)
 
-            # --- Enrichir via NVD si le score CVSS est manquant ---
+            # --- Enrichir via NVD uniquement en mode DEEP si le score CVSS est manquant ---
             enriched_results: list[VulnerabilityResult] = []
             for vuln in osv_results:
-                if vuln.cvss_score == 0.0 and vuln.cve_id.startswith("CVE-"):
+                if scan_type == "deep" and vuln.cvss_score == 0.0 and vuln.cve_id.startswith("CVE-"):
                     # Essayer d'obtenir le score précis depuis NVD
                     nvd_result = query_nvd_by_cve_id(vuln.cve_id)
-                    if nvd_result and nvd_result.cvss_score > 0.0:
-                        # Mettre à jour le score et la sévérité
-                        vuln.cvss_score = nvd_result.cvss_score
-                        vuln.severity = cvss_to_severity(nvd_result.cvss_score)
+                    if nvd_result:
+                        if nvd_result.cvss_score > 0.0:
+                            # Mettre à jour le score et la sévérité
+                            vuln.cvss_score = nvd_result.cvss_score
+                            vuln.severity = cvss_to_severity(nvd_result.cvss_score)
                         vuln.source = "OSV+NVD"
+                        if nvd_result.exploit_available:
+                            vuln.exploit_available = True
+                        if nvd_result.published_date:
+                            vuln.published_date = nvd_result.published_date
                         logger.debug(
-                            "Score enrichi via NVD pour %s : %.1f (%s)",
-                            vuln.cve_id, vuln.cvss_score, vuln.severity.value,
+                            "Données enrichies via NVD pour %s : CVSS=%.1f (%s), Exploit=%s",
+                            vuln.cve_id, vuln.cvss_score, vuln.severity.value, vuln.exploit_available,
                         )
 
                 enriched_results.append(vuln)
