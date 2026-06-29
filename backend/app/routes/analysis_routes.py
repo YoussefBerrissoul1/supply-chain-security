@@ -41,7 +41,13 @@ from app.services.github_analyzer import (
 )
 from app.services.dependency_scanner import scan_dependencies, DependencyInfo
 from app.services.cve_service import scan_all_vulnerabilities, VulnerabilityResult
-from app.services.docker_scanner import scan_docker
+from app.services.docker_scanner import (
+    scan_docker,
+    run_trivy_scan,
+    parse_trivy_report,
+    calculate_image_score,
+    is_trivy_available,
+)
 from app.services.score_service import compute_security_score
 from app.services.ai_service import generate_recommendations
 from app.services.report_service import generate_pdf_report
@@ -486,4 +492,99 @@ def health_check(
         "status": "ok",
         "version": settings.APP_VERSION,
         "database": db_status,
+    }
+
+
+# ============================================================
+# POST /scan-image — Scanner une image Docker Hub directement
+# ============================================================
+
+from pydantic import BaseModel as PydanticBaseModel
+
+class ImageScanRequest(PydanticBaseModel):
+    """Corps de la requete POST /scan-image."""
+    image_name: str
+
+
+@router.post(
+    "/scan-image",
+    summary="Scanner une image Docker Hub directement",
+    description=(
+        "Accepte un nom d'image Docker Hub (ex: vulnerables/web-dvwa, python:3.12-slim) "
+        "et retourne immediatement le rapport Trivy avec le score de securite. "
+        "Ne necessite pas de depot GitHub."
+    ),
+)
+def scan_docker_image(request: ImageScanRequest):
+    """
+    Scanner une image Docker directement depuis Docker Hub via Trivy.
+
+    Exemples d'images :
+        - vulnerables/web-dvwa         (intentionnellement vulnerable)
+        - python:3.12-slim             (image de base Python)
+        - node:18-alpine               (image Node minimale)
+        - ubuntu:22.04                 (systeme de base)
+
+    Retourne :
+        Un dict avec image_name, score, vulnerabilities_count,
+        vulnerabilities_by_severity, trivy_available.
+    """
+    image_name = request.image_name.strip()
+
+    if not image_name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Le nom de l'image est requis.",
+        )
+
+    logger.info("Scan direct image Docker : %s", image_name)
+
+    # Verifier que Trivy est disponible
+    if not is_trivy_available():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Trivy n'est pas installe sur ce serveur. "
+                "Installez Trivy depuis https://trivy.dev/latest/getting-started/installation/"
+            ),
+        )
+
+    # Lancer le scan Trivy
+    trivy_data = run_trivy_scan(image_name)
+
+    if trivy_data is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                f"Impossible de scanner l'image '{image_name}'. "
+                "Verifiez que le nom est correct et que l'image existe sur Docker Hub."
+            ),
+        )
+
+    # Parser les resultats
+    vulns_by_severity = parse_trivy_report(trivy_data)
+    total_vulns = sum(vulns_by_severity.values())
+
+    # Calculer le score (on suppose root=True si image inconnue)
+    image_score = calculate_image_score(
+        vulns_by_severity=vulns_by_severity,
+        has_root_user=True,
+        base_image=image_name,
+    )
+
+    logger.info(
+        "Scan image '%s' termine : %d vulns, score=%.1f",
+        image_name, total_vulns, image_score,
+    )
+
+    return {
+        "image_name":              image_name,
+        "image_score":             image_score,
+        "vulnerabilities_count":   total_vulns,
+        "vulnerabilities_by_severity": vulns_by_severity,
+        "trivy_available":         True,
+        "detail": (
+            f"Scan Trivy termine : {total_vulns} vulnerabilite(s) detectee(s) "
+            f"dans '{image_name}'."
+        ),
     }
