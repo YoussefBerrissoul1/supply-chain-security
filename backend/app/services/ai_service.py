@@ -8,13 +8,13 @@ import json
 import logging
 from typing import Any, Optional
 import httpx
-import google.generativeai as genai
+from google import genai
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.recommendation import Recommendation, TargetType
 from app.services.score_service import ScoreResult
-from app.services.cve_service import VulnerabilityResult
+from app.services.cve_service import VulnerabilityResult, Severity
 
 logger = logging.getLogger(__name__)
 
@@ -24,39 +24,45 @@ def generate_recommendations(
     analysis_id: int,
     score_result: ScoreResult,
     cve_results: dict[str, list[VulnerabilityResult]],
+    repo_name: str = "inconnu",
+    ecosystems: list[str] | None = None,
+    total_deps: int = 0,
 ) -> list[Recommendation]:
     """
     Orchestre la génération de recommandations.
-    Tente d'appeler l'API configurée (Gemini ou OpenRouter).
-    En cas d'échec ou d'absence de clé, bascule sur les règles de secours statiques.
+    Stratégie de sélection du fournisseur IA :
+        1. Gemini API (fournisseur principal — clé configurée dans .env)
+        2. OpenRouter API (fallback si Gemini échoue)
+        3. Système expert statique (dernier recours si aucune API ne répond)
     Enregistre le résultat en base de données avant de le retourner.
     """
     logger.info("=== Génération des recommandations de sécurité ===")
     provider = settings.AI_PROVIDER.lower()
     recommendations_data = []
 
-    # Étape 1 : Essayer de générer via l'IA
-    if provider == "gemini" and settings.GEMINI_API_KEY:
+    # Étape 1 : Essayer Gemini en priorité
+    if settings.GEMINI_API_KEY:
         try:
-            recommendations_data = _generate_with_gemini(score_result, cve_results)
+            recommendations_data = _generate_with_gemini(score_result, cve_results, repo_name, ecosystems, total_deps)
+            provider = "gemini"
             logger.info("Recommandations générées avec succès via Gemini API")
         except Exception as e:
-            logger.error("Échec de la génération avec Gemini : %s. Bascule sur le fallback statique.", e)
-            provider = "static_fallback"
-            recommendations_data = _generate_static_fallback(score_result, cve_results)
+            logger.error("Échec de la génération avec Gemini : %s", e)
+            recommendations_data = []  # Forcer le passage au fallback suivant
 
-    elif provider == "openrouter" and settings.OPENROUTER_API_KEY:
+    # Étape 2 : Si Gemini n'a rien retourné, essayer OpenRouter
+    if not recommendations_data and settings.OPENROUTER_API_KEY:
         try:
-            recommendations_data = _generate_with_openrouter(score_result, cve_results)
-            logger.info("Recommandations générées avec succès via OpenRouter API")
+            recommendations_data = _generate_with_openrouter(score_result, cve_results, repo_name, ecosystems, total_deps)
+            provider = "openrouter"
+            logger.info("Recommandations générées avec succès via OpenRouter API (fallback)")
         except Exception as e:
-            logger.error("Échec de la génération avec OpenRouter : %s. Bascule sur le fallback statique.", e)
-            provider = "static_fallback"
-            recommendations_data = _generate_static_fallback(score_result, cve_results)
+            logger.error("Échec de la génération avec OpenRouter : %s", e)
+            recommendations_data = []
 
-    else:
-        # Aucun fournisseur configuré
-        logger.warning("Aucun fournisseur d'IA configuré ou clé manquante. Utilisation du fallback statique.")
+    # Étape 3 : Dernier recours — système expert statique
+    if not recommendations_data:
+        logger.warning("Aucune IA disponible ou toutes ont échoué. Utilisation du fallback statique.")
         provider = "static_fallback"
         recommendations_data = _generate_static_fallback(score_result, cve_results)
 
@@ -94,10 +100,28 @@ def generate_recommendations(
     return db_recommendations
 
 
-def _build_prompt(score_result: ScoreResult, cve_results: dict[str, list[VulnerabilityResult]]) -> str:
-    """Construit un prompt détaillé et structuré pour l'IA."""
-    
-    # 1. Résumé du score
+def _build_prompt(
+    score_result: ScoreResult,
+    cve_results: dict[str, list[VulnerabilityResult]],
+    repo_name: str = "inconnu",
+    ecosystems: list[str] | None = None,
+    total_deps: int = 0,
+) -> str:
+    """
+    Construit un prompt détaillé et structuré pour l'IA.
+    Inclut le contexte complet du projet pour permettre à Gemini
+    de formuler des recommandations personnalisées et pertinentes.
+    """
+
+    # 1. Contexte du projet analysé
+    eco_str = ", ".join(ecosystems) if ecosystems else "non détecté"
+    project_context = (
+        f"Nom du dépôt GitHub analysé : {repo_name}\n"
+        f"Écosystèmes détectés : {eco_str}\n"
+        f"Nombre total de dépendances : {total_deps}\n"
+    )
+
+    # 2. Résumé du score de sécurité
     summary = (
         f"Score de sécurité global : {score_result.final_score}/100\n"
         f"Niveau de risque : {score_result.risk_level.value}\n"
@@ -105,44 +129,48 @@ def _build_prompt(score_result: ScoreResult, cve_results: dict[str, list[Vulnera
         f"Dockerfile présent : {'Oui' if score_result.has_docker else 'Non'}\n"
     )
 
-    # 2. Détail des pénalités
+    # 3. Détail des pénalités appliquées par la matrice 3D
     penalties_str = ""
     for p in score_result.penalties:
         penalties_str += f"- {p.category} : -{p.applied} pts\n"
 
-    # 3. Liste des CVE critiques et importantes
+    # 4. Liste des CVE critiques et importantes (max 15 pour ne pas saturer le contexte)
     cves_str = ""
     cve_count = 0
     for dep_key, vulns in cve_results.items():
         for vuln in vulns:
-            if vuln.severity in ["CRITICAL", "HIGH", "MEDIUM"]:
+            # Comparaison avec l'enum Severity (pas avec des strings)
+            if vuln.severity in [Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM]:
                 cve_count += 1
-                # Limiter le prompt à 15 vulnérabilités majeures pour ne pas saturer le contexte
                 if cve_count <= 15:
                     cves_str += (
-                        f"- [{vuln.severity}] {vuln.cve_id} sur {dep_key} | "
+                        f"- [{vuln.severity.value}] {vuln.cve_id} sur {dep_key} | "
                         f"CVSS: {vuln.cvss_score} | "
                         f"Patch: {vuln.fixed_version or 'Non disponible'} | "
                         f"Exploit public: {'Oui' if vuln.exploit_available else 'Non'}\n"
                     )
 
-    # 4. Instructions de formatage
+    # 5. Prompt complet avec instructions de formatage
     prompt = f"""Tu es un expert en cybersécurité spécialisé dans la sécurisation de la chaîne d'approvisionnement logicielle (Software Supply Chain Security).
-Voici les résultats d'un scan automatique effectué sur un projet GitHub :
 
+CONTEXTE DU PROJET ANALYSÉ :
+{project_context}
+
+RÉSULTATS DU SCAN DE SÉCURITÉ :
 {summary}
 
-DÉTAILS DES PÉNALITÉS APPLIQUÉES :
-{penalties_str}
+DÉTAILS DES PÉNALITÉS APPLIQUÉES (Matrice de risque 3D : Sévérité × Exploitabilité × Impact) :
+{penalties_str if penalties_str else "Aucune pénalité."}
 
-VULNÉRABILITÉS DÉTECTEES (max 15 affichées) :
+VULNÉRABILITÉS DÉTECTÉES (max 15 affichées sur {cve_count} total) :
 {cves_str if cves_str else "Aucune vulnérabilité majeure."}
 
-Rédige des recommandations claires et concrètes pour corriger ces faiblesses.
+En te basant sur ces résultats concrets, rédige des recommandations claires, concrètes et actionnables pour corriger ces faiblesses de sécurité.
+Pour chaque recommandation, précise le nom exact du paquet concerné et la version corrective si disponible.
 Tu dois classer tes recommandations en 3 types de cibles :
-- "dependency" (mises à jour de paquets vulnérables spécifiques)
-- "docker" (bonnes pratiques Dockerfile, images de base sécurisées)
-- "global" (mise en place de pipelines CI/CD de sécurité, Dependabot, etc.)
+- "dependency" (mises à jour de paquets vulnérables spécifiques avec les versions correctives)
+- "docker" (bonnes pratiques Dockerfile, images de base sécurisées, utilisateur non-root)
+- "global" (mise en place de pipelines CI/CD de sécurité, Dependabot, audits réguliers)
 
 Tu dois impérativement retourner le résultat sous la forme d'un tableau JSON valide contenant des objets avec cette structure exacte, sans aucun autre texte autour :
 [
@@ -160,18 +188,26 @@ Ne mets pas de balises markdown de type ```json. Retourne uniquement la chaîne 
     return prompt
 
 
-def _generate_with_gemini(score_result: ScoreResult, cve_results: dict[str, list[VulnerabilityResult]]) -> list[dict]:
-    """Appelle l'API Gemini pour obtenir les recommandations."""
-    genai.configure(api_key=settings.GEMINI_API_KEY)
-    
-    # Utilisation de gemini-2.5-flash ou du modèle par défaut configuré
-    model = genai.GenerativeModel("gemini-2.5-flash")
-    prompt = _build_prompt(score_result, cve_results)
-    
-    response = model.generate_content(prompt)
+def _generate_with_gemini(
+    score_result: ScoreResult,
+    cve_results: dict[str, list[VulnerabilityResult]],
+    repo_name: str = "inconnu",
+    ecosystems: list[str] | None = None,
+    total_deps: int = 0,
+) -> list[dict]:
+    """Appelle l'API Gemini (fournisseur principal) pour obtenir les recommandations."""
+    # Nouveau SDK google-genai (v2.x) : utilise un Client avec api_key
+    client = genai.Client(api_key=settings.GEMINI_API_KEY)
+
+    prompt = _build_prompt(score_result, cve_results, repo_name, ecosystems, total_deps)
+
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt,
+    )
     text = response.text.strip()
-    
-    # Nettoyer d'éventuels blocs de code markdown s'ils ont été retournés malgré la consigne
+
+    # Nettoyer d'eventuels blocs de code markdown s'ils ont ete retournes malgre la consigne
     if text.startswith("```"):
         lines = text.splitlines()
         if lines[0].startswith("```"):
@@ -179,13 +215,19 @@ def _generate_with_gemini(score_result: ScoreResult, cve_results: dict[str, list
         if lines[-1].startswith("```"):
             lines = lines[:-1]
         text = "\n".join(lines).strip()
-        
+
     return json.loads(text)
 
 
-def _generate_with_openrouter(score_result: ScoreResult, cve_results: dict[str, list[VulnerabilityResult]]) -> list[dict]:
-    """Appelle l'API OpenRouter (fallback)."""
-    prompt = _build_prompt(score_result, cve_results)
+def _generate_with_openrouter(
+    score_result: ScoreResult,
+    cve_results: dict[str, list[VulnerabilityResult]],
+    repo_name: str = "inconnu",
+    ecosystems: list[str] | None = None,
+    total_deps: int = 0,
+) -> list[dict]:
+    """Appelle l'API OpenRouter (fallback si Gemini échoue)."""
+    prompt = _build_prompt(score_result, cve_results, repo_name, ecosystems, total_deps)
     
     headers = {
         "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",

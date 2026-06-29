@@ -51,10 +51,21 @@ app.include_router(
 # --- Événement au démarrage ---
 @app.on_event("startup")
 def startup_event() -> None:
-    """Log au démarrage de l'application."""
+    """Log au démarrage de l'application et vérifie les clés API."""
     logger.info("=== %s v%s démarré ===", settings.APP_NAME, settings.APP_VERSION)
     logger.info("Mode debug : %s", settings.DEBUG)
     logger.info("Documentation Swagger : http://%s:%s/docs", "localhost", 8000)
+
+    # Vérification des clés API IA au démarrage
+    if settings.GEMINI_API_KEY:
+        logger.info("✅ GEMINI_API_KEY configurée — Gemini sera utilisé pour les recommandations")
+    else:
+        logger.warning("⚠️ GEMINI_API_KEY manquante — mode fallback statique activé pour les recommandations")
+
+    if settings.OPENROUTER_API_KEY:
+        logger.info("✅ OPENROUTER_API_KEY configurée — disponible en fallback si Gemini échoue")
+    else:
+        logger.info("ℹ️ OPENROUTER_API_KEY non configurée — pas de fallback OpenRouter")
 
 
 # --- Point d'entrée pour exécution directe ---
