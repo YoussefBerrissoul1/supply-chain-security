@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>Supply Chain Security — Interface de Test</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet"/>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <style>
+    :root{--dark:#0a0e1a;--card:#111827;--border:#1f2937}
+    *{font-family:Inter,sans-serif}
+    body{background:var(--dark);color:#e5e7eb;min-height:100vh}
+    .top-nav{background:rgba(10,14,26,.97);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:100}
+    .brand{background:linear-gradient(135deg,#3b82f6,#8b5cf6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;font-weight:800;font-size:1.2rem}
+    .hero{background:linear-gradient(135deg,#0f172a 0%,#1e1b4b 50%,#0f172a 100%);border-bottom:1px solid var(--border);padding:2.5rem 0 2rem}
+    .hero h1{font-size:2rem;font-weight:800;background:linear-gradient(135deg,#60a5fa,#a78bfa,#34d399);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+    .card-dark{background:var(--card);border:1px solid var(--border);border-radius:12px}
+    .chdr{background:rgba(255,255,255,.03);border-bottom:1px solid var(--border);font-weight:600;font-size:.92rem;padding:.85rem 1.2rem;display:flex;align-items:center;gap:.5rem}
+    .inp{background:#1f2937;border:1px solid #374151;color:#e5e7eb;border-radius:8px}
+    .inp:focus{background:#1f2937;border-color:#3b82f6;color:#e5e7eb;box-shadow:0 0 0 3px rgba(59,130,246,.15)}
+    .inp::placeholder{color:#6b7280}
+    .sel{background:#1f2937;border:1px solid #374151;color:#e5e7eb}
+    .sel:focus{background:#1f2937;border-color:#3b82f6;color:#e5e7eb;box-shadow:0 0 0 3px rgba(59,130,246,.15)}
+    .score-circle{width:130px;height:130px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;border:6px solid}
+    .sc-excellent{border-color:#10b981;color:#10b981;background:rgba(16,185,129,.08)}
+    .sc-bon{border-color:#34d399;color:#34d399;background:rgba(52,211,153,.08)}
+    .sc-moyen{border-color:#f59e0b;color:#f59e0b;background:rgba(245,158,11,.08)}
+    .sc-mauvais{border-color:#f97316;color:#f97316;background:rgba(249,115,22,.08)}
+    .sc-critique{border-color:#ef4444;color:#ef4444;background:rgba(239,68,68,.08)}
+    .sb{font-size:.78rem;padding:3px 12px;border-radius:20px;font-weight:600}
+    .sb-pending{background:rgba(245,158,11,.15);color:#f59e0b;border:1px solid rgba(245,158,11,.3)}
+    .sb-running{background:rgba(59,130,246,.15);color:#60a5fa;border:1px solid rgba(59,130,246,.3)}
+    .sb-done{background:rgba(16,185,129,.15);color:#10b981;border:1px solid rgba(16,185,129,.3)}
+    .sb-failed{background:rgba(239,68,68,.15);color:#f87171;border:1px solid rgba(239,68,68,.3)}
+    .cv-crit{color:#f87171;font-weight:700}.cv-high{color:#fb923c;font-weight:700}.cv-med{color:#fbbf24;font-weight:600}.cv-low{color:#9ca3af}
+    .tbl{color:#e5e7eb;font-size:.86rem}
+    .tbl thead th{background:rgba(255,255,255,.04);border-color:var(--border);color:#9ca3af;font-weight:600;font-size:.74rem;text-transform:uppercase;letter-spacing:.5px}
+    .tbl tbody tr{border-color:#1f2937;transition:background .15s}
+    .tbl tbody tr:hover{background:rgba(255,255,255,.03)}
+    .tbl td{border-color:#1f2937;vertical-align:middle}
+    .rec-card{background:rgba(59,130,246,.05);border:1px solid rgba(59,130,246,.15);border-radius:10px;padding:.9rem 1.1rem;margin-bottom:.6rem}
+    .tag-g{background:rgba(139,92,246,.2);color:#a78bfa;border-radius:12px;padding:2px 10px;font-size:.7rem;font-weight:600}
+    .tag-o{background:rgba(16,185,129,.2);color:#34d399;border-radius:12px;padding:2px 10px;font-size:.7rem;font-weight:600}
+    .tag-s{background:rgba(156,163,175,.2);color:#9ca3af;border-radius:12px;padding:2px 10px;font-size:.7rem;font-weight:600}
+    .hist-item{background:rgba(255,255,255,.02);border:1px solid var(--border);border-radius:10px;padding:.8rem 1.1rem;margin-bottom:.5rem;cursor:pointer;transition:all .2s}
+    .hist-item:hover{background:rgba(59,130,246,.05);border-color:rgba(59,130,246,.3);transform:translateX(3px)}
+    .docker-c{background:rgba(14,165,233,.05);border:1px solid rgba(14,165,233,.2);border-radius:10px;padding:1.1rem}
+    .pg-dark{background:#1f2937;border-radius:8px}
+    .dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+    .dot-g{background:#10b981;box-shadow:0 0 6px #10b981}
+    .dot-r{background:#ef4444;box-shadow:0 0 6px #ef4444}
+    .dot-y{background:#f59e0b;box-shadow:0 0 6px #f59e0b}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+    .pulse{animation:pulse 1.5s ease-in-out infinite}
+    .tw{position:fixed;top:72px;right:16px;z-index:9999;min-width:300px}
+    .ti{background:#1f2937;border:1px solid #374151;border-radius:10px;margin-bottom:8px}
+    .tab-btn{padding:10px 14px;border:none;background:transparent;color:#6b7280;font-size:.86rem;cursor:pointer;border-bottom:2px solid transparent;transition:color .15s}
+    .tab-btn.active{color:#e5e7eb;border-bottom:2px solid #3b82f6}
+    .tab-btn:hover{color:#9ca3af}
+  </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav class="top-nav d-flex align-items-center justify-content-between px-4 py-2">
+  <span class="brand"><i class="bi bi-shield-check me-2"></i>Supply Chain Security Platform</span>
+  <div class="d-flex align-items-center gap-3">
+    <span class="d-flex align-items-center gap-2" style="font-size:.82rem">
+      <span class="dot dot-y pulse" id="stDot"></span>
+      <span id="stTxt" class="text-muted">Connexion...</span>
+    </span>
+    <a href="http://localhost:8000/docs" target="_blank" class="btn btn-sm btn-outline-secondary"><i class="bi bi-code-square me-1"></i>Swagger</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="container">
+    <h1 class="mb-2"><i class="bi bi-shield-shaded me-2"></i>Audit Securite Supply Chain</h1>
+    <p class="text-muted mb-3" style="font-size:1rem">Detectez les CVE, analysez Docker, obtenez des recommandations IA et generez un rapport PDF.</p>
+    <div class="d-flex gap-2 flex-wrap">
+      <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 px-3 py-2"><i class="bi bi-bug me-1"></i>OSV + NVD</span>
+      <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 px-3 py-2"><i class="bi bi-hdd-stack me-1"></i>Docker/Trivy</span>
+      <span class="badge px-3 py-2" style="background:rgba(139,92,246,.1);color:#a78bfa;border:1px solid rgba(139,92,246,.3)"><i class="bi bi-robot me-1"></i>Gemini AI</span>
+      <span class="badge bg-warning bg-opacity-10 text-warning border border-warning border-opacity-25 px-3 py-2"><i class="bi bi-file-pdf me-1"></i>Rapport PDF</span>
+    </div>
+  </div>
+</div>
+
+<div class="tw" id="tw"></div>
+
+<div class="container py-4">
+  <div class="row g-4">
+
+    <!-- GAUCHE -->
+    <div class="col-lg-5">
+
+      <!-- FORMULAIRE -->
+      <div class="card-dark mb-4">
+        <div class="chdr"><i class="bi bi-search text-primary"></i>Lancer une Analyse</div>
+        <div class="p-4">
+          <div class="mb-3">
+            <label class="form-label text-muted small fw-semibold">URL du Depot GitHub</label>
+            <input type="url" id="repoUrl" class="form-control inp" placeholder="https://github.com/owner/repo"/>
+          </div>
+          <div class="mb-3">
+            <label class="form-label text-muted small fw-semibold">Type de Scan</label>
+            <select id="scanType" class="form-select sel">
+              <option value="standard">Standard — rapide via OSV (recommande)</option>
+              <option value="deep">Deep — complet via NVD (plus lent)</option>
+            </select>
+          </div>
+          <div class="mb-4">
+            <div class="text-muted small fw-semibold mb-2">Exemples rapides :</div>
+            <div class="d-flex flex-wrap gap-2">
+              <button class="btn btn-sm btn-outline-secondary" onclick="setUrl('https://github.com/fastapi/fastapi')">fastapi</button>
+              <button class="btn btn-sm btn-outline-secondary" onclick="setUrl('https://github.com/django/django')">django</button>
+              <button class="btn btn-sm btn-outline-secondary" onclick="setUrl('https://github.com/expressjs/express')">express</button>
+              <button class="btn btn-sm btn-outline-secondary" onclick="setUrl('https://github.com/pallets/flask')">flask</button>
+            </div>
+          </div>
+          <button id="analyzeBtn" class="btn btn-primary w-100 fw-semibold py-2" onclick="startAnalysis()">
+            <i class="bi bi-play-fill me-2"></i>Lancer l'Analyse
+          </button>
+        </div>
+      </div>
+
+      <!-- SUIVI -->
+      <div class="card-dark mb-4" id="trackCard" style="display:none">
+        <div class="chdr"><i class="bi bi-activity text-warning pulse"></i>Analyse en cours<span class="ms-auto sb" id="trackBadge">PENDING</span></div>
+        <div class="p-4">
+          <div class="d-flex justify-content-between text-muted small mb-2">
+            <span id="trackRepo">—</span><span>ID #<span id="trackId">—</span></span>
+          </div>
+          <div class="progress pg-dark mb-2" style="height:6px">
+            <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary" id="trackBar" style="width:5%"></div>
+          </div>
+          <div class="text-muted small text-center" id="trackStep">Initialisation...</div>
+          <div class="text-center mt-2"><small class="text-muted" style="font-size:.71rem">Mise a jour toutes les 3 secondes</small></div>
+        </div>
+      </div>
+
+      <!-- HISTORIQUE -->
+      <div class="card-dark">
+        <div class="chdr"><i class="bi bi-clock-history text-info"></i>Historique<button class="btn btn-sm btn-outline-secondary ms-auto" onclick="loadHistory()"><i class="bi bi-arrow-clockwise"></i></button></div>
+        <div class="p-3" id="histBox">
+          <div class="text-center text-muted py-3 small"><i class="bi bi-inbox" style="font-size:2rem;opacity:.3"></i><div class="mt-2">Chargement...</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DROITE -->
+    <div class="col-lg-7">
+      <div id="empty" class="card-dark p-5 text-center">
+        <div style="font-size:5rem;opacity:.07">&#128202;</div>
+        <h5 class="text-muted mt-3">Aucun resultat</h5>
+        <p class="text-muted small">Lancez une analyse ou cliquez sur l'historique</p>
+      </div>
+
+      <div id="results" style="display:none">
+
+        <!-- SCORE -->
+        <div class="card-dark mb-4">
+          <div class="chdr"><i class="bi bi-bar-chart-fill text-primary"></i>Resultat<span class="ms-auto" id="resSt"></span></div>
+          <div class="p-4">
+            <div class="row g-3 align-items-center">
+              <div class="col-auto">
+                <div class="score-circle" id="scoreCircle">
+                  <div style="font-size:2.3rem;font-weight:800;line-height:1" id="scoreVal">-</div>
+                  <div style="font-size:.65rem;font-weight:600;letter-spacing:1px;opacity:.8">/ 100</div>
+                </div>
+              </div>
+              <div class="col">
+                <h5 class="mb-1 fw-bold" id="resName">-</h5>
+                <div class="text-muted small mb-2" id="resUrl">-</div>
+                <div class="d-flex flex-wrap gap-2" id="resStats"></div>
+              </div>
+            </div>
+            <div class="mt-3">
+              <div class="d-flex justify-content-between small text-muted mb-1">
+                <span>Score de Securite</span><span id="scoreLbl">-</span>
+              </div>
+              <div class="progress pg-dark" style="height:10px">
+                <div class="progress-bar" id="scoreBar" style="width:0%;border-radius:8px;transition:width 1.2s ease"></div>
+              </div>
+              <div class="d-flex justify-content-between small mt-1">
+                <span class="text-danger">0 Critique</span><span class="text-warning">50 Moyen</span><span class="text-success">100 Excellent</span>
+              </div>
+            </div>
+            <div class="mt-3 d-flex gap-2">
+              <button class="btn btn-danger btn-sm" id="pdfBtn" onclick="downloadPDF()" style="display:none"><i class="bi bi-file-pdf me-1"></i>Telecharger PDF</button>
+              <button class="btn btn-outline-secondary btn-sm" onclick="loadDetail(curId)"><i class="bi bi-arrow-clockwise me-1"></i>Actualiser</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- TABS -->
+        <div class="card-dark mb-4">
+          <div class="chdr p-0 ps-2 d-flex border-0" style="background:rgba(255,255,255,.03)">
+            <button class="tab-btn active" onclick="showTab('cve',this)"><i class="bi bi-bug me-1"></i>Vulnerabilites <span class="badge bg-danger ms-1" id="bdgCve" style="display:none"></span></button>
+            <button class="tab-btn" onclick="showTab('deps',this)"><i class="bi bi-box me-1"></i>Dependances <span class="badge bg-secondary ms-1" id="bdgDeps" style="display:none"></span></button>
+            <button class="tab-btn" onclick="showTab('docker',this)"><i class="bi bi-hdd-stack me-1"></i>Docker</button>
+            <button class="tab-btn" onclick="showTab('ai',this)"><i class="bi bi-robot me-1"></i>IA <span class="badge ms-1" style="background:rgba(139,92,246,.3);color:#a78bfa" id="bdgAi" style="display:none"></span></button>
+          </div>
+          <div class="p-4">
+            <div id="tabCve">
+              <div class="d-flex justify-content-between align-items-center mb-3">
+                <span class="text-muted small">CVE/GHSA triees par CVSS</span>
+                <div id="cveSev" class="d-flex gap-1"></div>
+              </div>
+              <div style="max-height:360px;overflow-y:auto">
+                <table class="table tbl">
+                  <thead><tr><th>ID CVE</th><th>Dependance</th><th>Severite</th><th>CVSS</th><th>Correctif</th></tr></thead>
+                  <tbody id="cveBody"><tr><td colspan="5" class="text-center text-muted py-3">Aucune CVE detectee</td></tr></tbody>
+                </table>
+              </div>
+            </div>
+            <div id="tabDeps" style="display:none">
+              <input type="text" class="form-control inp form-control-sm mb-3" id="depsFilter" placeholder="Filtrer..." oninput="filterDeps()"/>
+              <div style="max-height:360px;overflow-y:auto">
+                <table class="table tbl">
+                  <thead><tr><th>Nom</th><th>Version</th><th>Ecosysteme</th><th>CVE</th><th>Type</th></tr></thead>
+                  <tbody id="depsBody"><tr><td colspan="5" class="text-center text-muted py-3">-</td></tr></tbody>
+                </table>
+              </div>
+            </div>
+            <div id="tabDocker" style="display:none">
+              <div id="dockerBox"><div class="text-center text-muted py-4"><i class="bi bi-hdd-stack" style="font-size:2.5rem;opacity:.3"></i><div class="mt-2 small">Aucun Dockerfile detecte</div></div></div>
+            </div>
+            <div id="tabAi" style="display:none">
+              <div id="aiBox"><div class="text-center text-muted py-4 small">Aucune recommandation</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+const API='http://localhost:8000/api/v1';
+let poll=null,curId=null,allDeps=[];
+
+async function checkHealth(){
+  const dot=document.getElementById('stDot'),txt=document.getElementById('stTxt');
+  try{
+    const r=await fetch(API+'/health',{signal:AbortSignal.timeout(5000)});
+    const d=await r.json();
+    if(r.ok){dot.className='dot dot-g';txt.textContent='API connectee · DB: '+d.database;txt.style.color='#10b981';loadHistory();}
+    else throw new Error();
+  }catch{dot.className='dot dot-r';txt.textContent='Backend non disponible';txt.style.color='#f87171';toast('error','Backend hors ligne','Lancez: venv/Scripts/python.exe -m uvicorn app.main:app --reload --port 8000');}
+}
+
+async function startAnalysis(){
+  const url=document.getElementById('repoUrl').value.trim(),st=document.getElementById('scanType').value;
+  if(!url||!url.includes('github.com')){toast('warning','URL invalide','Entrez une URL GitHub');return;}
+  const btn=document.getElementById('analyzeBtn');
+  btn.disabled=true;btn.innerHTML='<span class="spinner-border spinner-border-sm me-2"></span>Envoi...';
+  try{
+    const r=await fetch(API+'/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({repo_url:url,scan_type:st})});
+    if(!r.ok){const e=await r.json();throw new Error(e.detail||'Erreur '+r.status);}
+    const a=await r.json();
+    toast('success','Analyse lancee !','ID #'+a.id+' — '+a.repo_name);
+    showTrack(a);startPoll(a.id);loadHistory();
+  }catch(e){toast('error','Erreur',e.message);}
+  finally{btn.disabled=false;btn.innerHTML='<i class="bi bi-play-fill me-2"></i>Lancer l\'Analyse';}
+}
+
+function showTrack(a){
+  document.getElementById('trackCard').style.display='block';
+  document.getElementById('trackRepo').textContent=a.repo_name;
+  document.getElementById('trackId').textContent=a.id;
+  document.getElementById('trackBar').style.width='5%';
+  document.getElementById('trackStep').textContent='Initialisation...';
+  setBadge('trackBadge',a.status);
+}
+
+const SI={PENDING:{p:5,t:'En file d\'attente...'},RUNNING:{p:55,t:'Scan CVE, Docker, IA...'},DONE:{p:100,t:'Termine avec succes !'},FAILED:{p:100,t:'Echec de l\'analyse'}};
+
+function startPoll(id){
+  if(poll)clearInterval(poll);
+  poll=setInterval(async()=>{
+    try{
+      const r=await fetch(API+'/analyses/'+id);if(!r.ok)return;
+      const d=await r.json();
+      setBadge('trackBadge',d.status);
+      const i=SI[d.status]||{p:30,t:'En cours...'};
+      document.getElementById('trackBar').style.width=i.p+'%';
+      document.getElementById('trackStep').textContent=i.t;
+      if(d.status==='DONE'||d.status==='FAILED'){
+        clearInterval(poll);poll=null;
+        if(d.status==='DONE'){toast('success','Termine !','Score: '+(d.security_score?.toFixed(1)||'-')+'/100');loadDetail(id);}
+        else toast('error','Echec','Verifiez les logs du backend');
+        loadHistory();
+      }
+    }catch{}
+  },3000);
+}
+
+async function loadDetail(id){
+  if(!id)return;curId=id;
+  try{const r=await fetch(API+'/analyses/'+id);if(!r.ok)throw new Error();render(await r.json());}
+  catch{toast('error','Erreur','Impossible de charger l\'analyse');}
+}
+
+function render(d){
+  document.getElementById('empty').style.display='none';
+  document.getElementById('results').style.display='block';
+  const s=d.security_score;
+  document.getElementById('scoreVal').textContent=s!=null?Math.round(s):'-';
+  const c=document.getElementById('scoreCircle');c.className='score-circle';
+  let cls='sc-critique',nm='CRITIQUE',col='#ef4444';
+  if(s>=90){cls='sc-excellent';nm='EXCELLENT';col='#10b981';}
+  else if(s>=70){cls='sc-bon';nm='BON';col='#34d399';}
+  else if(s>=50){cls='sc-moyen';nm='MOYEN';col='#f59e0b';}
+  else if(s>=30){cls='sc-mauvais';nm='MAUVAIS';col='#f97316';}
+  if(s!=null)c.classList.add(cls);
+  document.getElementById('scoreLbl').textContent=s!=null?(Math.round(s)+'/100 — '+nm):'-';
+  const bar=document.getElementById('scoreBar');bar.style.background=col;
+  setTimeout(()=>{bar.style.width=(s||0)+'%';},80);
+  document.getElementById('resName').textContent=d.repo_name||'-';
+  document.getElementById('resUrl').textContent=d.repo_url||'-';
+  document.getElementById('resSt').innerHTML=mkBadge(d.status);
+  const tc=d.dependencies?.reduce((a,x)=>a+(x.vulnerabilities?.length||0),0)||0;
+  const cc=d.dependencies?.reduce((a,x)=>a+(x.vulnerabilities?.filter(v=>v.severity==='CRITICAL')?.length||0),0)||0;
+  document.getElementById('resStats').innerHTML=
+    '<span class="badge" style="background:rgba(59,130,246,.1);color:#60a5fa;border:1px solid rgba(59,130,246,.3)"><i class="bi bi-box me-1"></i>'+(d.dependencies?.length||0)+' deps</span> '+
+    '<span class="badge" style="background:rgba(239,68,68,.1);color:#f87171;border:1px solid rgba(239,68,68,.3)"><i class="bi bi-bug me-1"></i>'+tc+' CVE</span>'+
+    (cc>0?'<span class="badge" style="background:rgba(239,68,68,.2);color:#f87171;border:1px solid rgba(239,68,68,.5)">\u26A0\uFE0F '+cc+' CRITICAL</span>':'')+
+    (d.docker_result?'<span class="badge" style="background:rgba(14,165,233,.1);color:#38bdf8;border:1px solid rgba(14,165,233,.3)"><i class="bi bi-hdd-stack me-1"></i>Docker</span>':'');
+  document.getElementById('pdfBtn').style.display=d.status==='DONE'?'inline-flex':'none';
+  renderCVE(d.dependencies||[]);
+  allDeps=d.dependencies||[];renderDeps(allDeps);
+  renderDocker(d.docker_result);renderAI(d.recommendations||[]);
+  document.getElementById('bdgCve').textContent=tc;document.getElementById('bdgCve').style.display=tc>0?'inline':'none';
+  document.getElementById('bdgDeps').textContent=d.dependencies?.length||0;document.getElementById('bdgDeps').style.display='inline';
+  document.getElementById('bdgAi').textContent=d.recommendations?.length||0;document.getElementById('bdgAi').style.display=(d.recommendations?.length>0)?'inline':'none';
+}
+
+function renderCVE(deps){
+  const vs=[];deps.forEach(d=>(d.vulnerabilities||[]).forEach(v=>vs.push({...v,dn:d.name,dv:d.version})));
+  vs.sort((a,b)=>(b.cvss_score||0)-(a.cvss_score||0));
+  const cnt={CRITICAL:0,HIGH:0,MEDIUM:0,LOW:0};vs.forEach(v=>{if(cnt[v.severity]!==undefined)cnt[v.severity]++;});
+  const col={CRITICAL:'#ef4444',HIGH:'#f97316',MEDIUM:'#f59e0b',LOW:'#9ca3af'};
+  document.getElementById('cveSev').innerHTML=Object.entries(cnt).filter(([,c])=>c>0).map(([s,c])=>'<span class="badge" style="background:rgba(0,0,0,.3);border:1px solid '+col[s]+';color:'+col[s]+'">'+c+' '+s+'</span>').join('');
+  if(!vs.length){document.getElementById('cveBody').innerHTML='<tr><td colspan="5" class="text-center text-success py-3"><i class="bi bi-check-circle me-2"></i>Aucune CVE detectee</td></tr>';return;}
+  const sc={CRITICAL:'cv-crit',HIGH:'cv-high',MEDIUM:'cv-med',LOW:'cv-low'};
+  document.getElementById('cveBody').innerHTML=vs.map(v=>'<tr><td><code style="font-size:.76rem;color:#a78bfa">'+v.cve_id+'</code></td><td><span style="color:#60a5fa">'+v.dn+'</span> <small class="text-muted">'+( v.dv||'')+'</small></td><td><span class="'+(sc[v.severity]||'cv-low')+'"><i class="bi bi-exclamation-triangle-fill me-1"></i>'+v.severity+'</span></td><td><strong>'+(v.cvss_score?.toFixed(1)||'-')+'</strong></td><td>'+(v.fixed_version?'<span class="text-success small"><i class="bi bi-arrow-up-circle me-1"></i>'+v.fixed_version+'</span>':'<span class="text-muted">-</span>')+'</td></tr>').join('');
+}
+
+function renderDeps(deps){
+  if(!deps?.length){document.getElementById('depsBody').innerHTML='<tr><td colspan="5" class="text-center text-muted py-3">Aucune dependance</td></tr>';return;}
+  const em={PyPI:'🐍',npm:'📦',Maven:'☕',Go:'🐹',RubyGems:'💎',Docker:'🐳'};
+  document.getElementById('depsBody').innerHTML=deps.map(d=>{const vc=d.vulnerabilities?.length||0;return '<tr><td><span class="fw-medium">'+d.name+'</span>'+(d.is_outdated?' <span class="badge bg-warning bg-opacity-10 text-warning border border-warning border-opacity-25" style="font-size:.63rem">outdated</span>':'')+'</td><td><code class="text-muted" style="font-size:.78rem">'+(d.version||'N/A')+'</code></td><td>'+(em[d.ecosystem]||'📦')+' '+d.ecosystem+'</td><td><span class="badge bg-'+(vc>0?'danger':'success')+' bg-opacity-10 text-'+(vc>0?'danger':'success')+' border border-'+(vc>0?'danger':'success')+' border-opacity-25">'+vc+' CVE</span></td><td>'+(d.is_dev?'<span class="text-muted small">Dev</span>':'<span class="text-info small">Prod</span>')+'</td></tr>';}).join('');
+}
+
+function filterDeps(){
+  const q=document.getElementById('depsFilter').value.toLowerCase();
+  renderDeps(allDeps.filter(d=>d.name.toLowerCase().includes(q)||(d.ecosystem||'').toLowerCase().includes(q)||(d.version||'').toLowerCase().includes(q)));
+}
+
+function renderDocker(dr){
+  const box=document.getElementById('dockerBox');
+  if(!dr){box.innerHTML='<div class="text-center text-muted py-4"><i class="bi bi-hdd-stack" style="font-size:2.5rem;opacity:.3"></i><div class="mt-2 small">Aucun Dockerfile detecte</div></div>';return;}
+  const sc=dr.image_score>=70?'#10b981':dr.image_score>=50?'#f59e0b':'#ef4444';
+  box.innerHTML='<div class="docker-c"><div class="row g-3"><div class="col-md-6"><div class="small text-muted mb-1">Image de base</div><div class="fw-semibold" style="color:#38bdf8">'+(dr.base_image||'N/A')+'</div></div><div class="col-md-3"><div class="small text-muted mb-1">Vulnerabilites</div><div class="fw-bold text-danger">'+(dr.vulnerabilities_count||0)+'</div></div><div class="col-md-3"><div class="small text-muted mb-1">Score</div><div class="fw-bold" style="color:'+sc+'">'+(dr.image_score?.toFixed(1)||'-')+'/100</div></div></div><hr style="border-color:#1f2937"/><div class="small"><i class="bi bi-'+(dr.has_root_user?'x-circle-fill text-danger':'check-circle-fill text-success')+' me-1"></i>'+(dr.has_root_user?'Utilise root (risque !)':'Non-root (bonne pratique) &#x2705;')+'</div></div>';
+}
+
+function renderAI(recs){
+  const box=document.getElementById('aiBox');
+  if(!recs?.length){box.innerHTML='<div class="text-center text-muted py-4 small">Aucune recommandation disponible</div>';return;}
+  const pcls={gemini:'tag-g',openrouter:'tag-o',static:'tag-s'};
+  const plbl={gemini:'&#x1F916; Gemini AI',openrouter:'&#x26A1; OpenRouter',static:'&#x1F4CB; Statique'};
+  box.innerHTML=recs.map(r=>'<div class="rec-card"><div class="d-flex justify-content-between align-items-start mb-2"><span class="fw-semibold small" style="color:#e5e7eb">'+(r.target_type||'General')+'</span><span class="'+(pcls[r.provider]||'tag-s')+'">'+(plbl[r.provider]||r.provider)+'</span></div><p class="mb-0 small text-muted" style="line-height:1.6">'+r.recommendation_text+'</p></div>').join('');
+}
+
+async function loadHistory(){
+  const box=document.getElementById('histBox');
+  try{
+    const r=await fetch(API+'/analyses?limit=10');if(!r.ok)throw new Error();
+    const list=await r.json();
+    if(!list.length){box.innerHTML='<div class="text-center text-muted py-3 small"><i class="bi bi-inbox" style="font-size:1.8rem;opacity:.3"></i><div class="mt-2">Aucune analyse</div></div>';return;}
+    box.innerHTML=list.map(a=>{
+      const s=a.security_score!=null?Math.round(a.security_score):null;
+      const sc=s==null?'#6b7280':s>=70?'#10b981':s>=50?'#f59e0b':'#ef4444';
+      return '<div class="hist-item" onclick="loadDetail('+a.id+')"><div class="d-flex justify-content-between align-items-center"><div><div class="fw-semibold small" style="color:#e5e7eb">'+a.repo_name+'</div><div class="text-muted" style="font-size:.7rem">'+new Date(a.created_at).toLocaleString('fr-FR')+'</div></div><div class="d-flex align-items-center gap-2">'+(s!=null?'<span class="fw-bold" style="color:'+sc+';font-size:.88rem">'+s+'</span>':'')+mkBadge(a.status)+'</div></div></div>';
+    }).join('');
+  }catch{box.innerHTML='<div class="text-center text-danger py-3 small">Erreur de chargement</div>';}
+}
+
+async function downloadPDF(){
+  const btn=document.getElementById('pdfBtn');
+  btn.innerHTML='<span class="spinner-border spinner-border-sm me-1"></span>Generation...';btn.disabled=true;
+  try{
+    const r=await fetch(API+'/analyses/'+curId+'/report');if(!r.ok)throw new Error('Rapport non disponible');
+    const blob=await r.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');
+    a.href=url;a.download='rapport_securite_'+curId+'.pdf';a.click();URL.revokeObjectURL(url);
+    toast('success','PDF telecharge !','Rapport genere avec succes');
+  }catch(e){toast('error','Erreur PDF',e.message);}
+  finally{btn.innerHTML='<i class="bi bi-file-pdf me-1"></i>Telecharger PDF';btn.disabled=false;}
+}
+
+function setUrl(u){document.getElementById('repoUrl').value=u;document.getElementById('repoUrl').focus();}
+
+function showTab(name,btn){
+  ['Cve','Deps','Docker','Ai'].forEach(t=>{document.getElementById('tab'+t).style.display='none';});
+  document.getElementById('tab'+name.charAt(0).toUpperCase()+name.slice(1)).style.display='block';
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+function mkBadge(st){
+  const m={PENDING:{c:'sb-pending',i:'clock',l:'PENDING'},RUNNING:{c:'sb-running',i:'arrow-repeat',l:'RUNNING'},DONE:{c:'sb-done',i:'check-circle',l:'DONE'},FAILED:{c:'sb-failed',i:'x-circle',l:'FAILED'}};
+  const x=m[st]||{c:'sb-pending',i:'question',l:st};
+  return '<span class="sb '+x.c+'"><i class="bi bi-'+x.i+'-fill me-1"></i>'+x.l+'</span>';
+}
+
+function setBadge(id,st){document.getElementById(id).innerHTML=mkBadge(st);}
+
+function toast(type,title,body){
+  const col={success:'#10b981',error:'#ef4444',warning:'#f59e0b',info:'#60a5fa'};
+  const ico={success:'check-circle-fill',error:'x-circle-fill',warning:'exclamation-triangle-fill',info:'info-circle-fill'};
+  const id='t'+Date.now();
+  document.getElementById('tw').insertAdjacentHTML('beforeend',
+    '<div id="'+id+'" class="ti"><div style="border-left:4px solid '+col[type]+';padding:.75rem 1rem"><div class="d-flex justify-content-between align-items-center mb-1"><strong style="color:#e5e7eb;font-size:.87rem"><i class="bi bi-'+ico[type]+' me-2" style="color:'+col[type]+'"></i>'+title+'</strong><button style="background:none;border:none;color:#6b7280;cursor:pointer;font-size:1.1rem;line-height:1" onclick="document.getElementById(\''+id+'\').remove()">&times;</button></div><div style="color:#9ca3af;font-size:.81rem">'+body+'</div></div></div>');
+  setTimeout(()=>{const el=document.getElementById(id);if(el)el.remove();},6000);
+}
+
+checkHealth();
+</script>
+</body>
+</html>
