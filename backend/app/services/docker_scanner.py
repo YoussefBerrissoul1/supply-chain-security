@@ -530,13 +530,20 @@ def scan_docker(
     """
 
     if not dockerfile_paths:
-        logger.info("Aucun Dockerfile dans ce dépôt — scan Docker ignoré")
+        logger.info("Aucun fichier Docker dans ce dépôt — scan Docker ignoré")
+        return None
+
+    # Filtrer pour ne garder que les vrais 'Dockerfile' (ignorer docker-compose.yml etc)
+    actual_dockerfiles = [p for p in dockerfile_paths if Path(p).name.lower() == "dockerfile"]
+
+    if not actual_dockerfiles:
+        logger.info("Aucun vrai Dockerfile trouvé (seulement des docker-compose etc) — scan Docker ignoré")
         return None
 
     # On analyse le premier Dockerfile trouvé
     # (les monorepos avec plusieurs Dockerfiles sont rares dans un PFE)
-    first_dockerfile = repo_path / dockerfile_paths[0]
-    logger.info("Analyse Docker sur : %s", dockerfile_paths[0])
+    first_dockerfile = repo_path / actual_dockerfiles[0]
+    logger.info("Analyse Docker sur : %s", actual_dockerfiles[0])
 
     # --- Étape 1 : Analyse statique du Dockerfile ---
     static_analysis = analyze_dockerfile(first_dockerfile)
