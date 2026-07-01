@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from app.core.config import settings
+from app.services.cve_service import VulnerabilityResult, Severity
 
 logger = logging.getLogger(__name__)
 
@@ -371,6 +372,82 @@ def run_trivy_scan(image_name: str) -> dict | None:
 # ==============================================================
 # ÉTAPE 4 : PARSER LE RAPPORT TRIVY
 # ==============================================================
+
+def extract_trivy_vulnerabilities(trivy_data: dict) -> list[VulnerabilityResult]:
+    """
+    Extrait la liste détaillée des vulnérabilités depuis la sortie JSON de Trivy.
+
+    Paramètres :
+        trivy_data : dict retourné par run_trivy_scan()
+
+    Retourne :
+        list[VulnerabilityResult] : Liste des vulnérabilités formatées pour l'IA et la base.
+    """
+    results: list[VulnerabilityResult] = []
+
+    if not trivy_data:
+        return results
+
+    trivy_results = trivy_data.get("Results", [])
+    if not trivy_results:
+        return results
+
+    for result_block in trivy_results:
+        vulnerabilities = result_block.get("Vulnerabilities") or []
+
+        for vuln in vulnerabilities:
+            cve_id = vuln.get("VulnerabilityID", "UNKNOWN")
+            severity_str = vuln.get("Severity", "UNKNOWN").upper()
+
+            # Map Trivy Severity to our standard Severity enum
+            severity = Severity.NONE
+            if severity_str == "CRITICAL":
+                severity = Severity.CRITICAL
+            elif severity_str == "HIGH":
+                severity = Severity.HIGH
+            elif severity_str == "MEDIUM":
+                severity = Severity.MEDIUM
+            elif severity_str == "LOW":
+                severity = Severity.LOW
+
+            # Extract CVSS score (prefer NVD V3, fallback to V2 or others)
+            cvss_score = 0.0
+            cvss_data = vuln.get("CVSS", {})
+            for source, scores in cvss_data.items():
+                if isinstance(scores, dict):
+                    if "V3Score" in scores and scores["V3Score"] is not None:
+                        cvss_score = float(scores["V3Score"])
+                        break
+                    elif "V2Score" in scores and scores["V2Score"] is not None:
+                        cvss_score = float(scores["V2Score"])
+
+            description = vuln.get("Title") or vuln.get("Description", "Aucune description.")
+            fixed_version = vuln.get("FixedVersion")
+            published_date = vuln.get("PublishedDate")
+
+            # Estimate exploit available if any URL references exploit DB
+            exploit_available = False
+            references = vuln.get("References", [])
+            for ref in references:
+                ref_lower = ref.lower()
+                if "exploit" in ref_lower or "poc" in ref_lower:
+                    exploit_available = True
+                    break
+
+            res = VulnerabilityResult(
+                cve_id=cve_id,
+                cvss_score=cvss_score,
+                severity=severity,
+                description=description,
+                source="Trivy",
+                fixed_version=fixed_version,
+                exploit_available=exploit_available,
+                published_date=published_date
+            )
+            results.append(res)
+
+    return results
+
 
 def parse_trivy_report(trivy_data: dict) -> dict[str, int]:
     """
