@@ -139,12 +139,13 @@ def _build_prompt(
     cve_count = 0
     for dep_key, vulns in cve_results.items():
         for vuln in vulns:
-            # Comparaison avec l'enum Severity (pas avec des strings)
-            if vuln.severity in [Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM]:
+            # Fix: VulnerabilityResult severity is an Enum, we check its value or name
+            sev_val = vuln.severity.value if hasattr(vuln.severity, 'value') else str(vuln.severity)
+            if sev_val in ["CRITICAL", "HIGH", "MEDIUM"]:
                 cve_count += 1
                 if cve_count <= 15:
                     cves_str += (
-                        f"- [{vuln.severity.value}] {vuln.cve_id} sur {dep_key} | "
+                        f"- [{sev_val}] {vuln.cve_id} sur {dep_key} | "
                         f"CVSS: {vuln.cvss_score} | "
                         f"Patch: {vuln.fixed_version or 'Non disponible'} | "
                         f"Exploit public: {'Oui' if vuln.exploit_available else 'Non'}\n"
@@ -172,11 +173,13 @@ Tu dois classer tes recommandations en 3 types de cibles :
 - "docker" (bonnes pratiques Dockerfile, images de base sécurisées, utilisateur non-root)
 - "global" (mise en place de pipelines CI/CD de sécurité, Dependabot, audits réguliers)
 
-Tu dois impérativement retourner le résultat sous la forme d'un tableau JSON valide contenant des objets avec cette structure exacte, sans aucun autre texte autour :
+Tu dois impérativement retourner le résultat sous la forme d'un tableau JSON valide contenant des objets avec cette structure exacte, sans aucun autre texte autour.
+Si le projet est purement une image Docker, concentre-toi sur les paquets OS de base et l'utilisateur root.
+
 [
   {{
     "target_type": "dependency",
-    "recommendation_text": "Explication claire de ce qu'il faut mettre à jour."
+    "recommendation_text": "Explication claire de ce qu'il faut mettre à jour en citant explicitement les dépendances détectées."
   }},
   {{
     "target_type": "docker",

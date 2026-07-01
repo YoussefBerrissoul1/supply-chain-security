@@ -30,6 +30,9 @@ class Analysis(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     repo_url: Mapped[str] = mapped_column(String(500), nullable=False)
     repo_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    target_type: Mapped[str] = mapped_column(
+        String(50), default="github", server_default="github", nullable=False
+    )
     status: Mapped[AnalysisStatus] = mapped_column(
         Enum(AnalysisStatus), default=AnalysisStatus.PENDING, nullable=False
     )

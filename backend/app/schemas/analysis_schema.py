@@ -13,21 +13,24 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 # ============================================================
 
 
-class AnalysisRequest(BaseModel):
-    """
-    Schema d'entrée pour lancer une analyse.
-    L'utilisateur envoie uniquement l'URL du dépôt GitHub.
-    """
-    repo_url: HttpUrl = Field(
-        ...,
-        description="URL complète du dépôt GitHub à analyser",
-        examples=["https://github.com/fastapi/fastapi"],
-    )
+class AnalysisBase(BaseModel):
+    repo_url: str = Field(..., max_length=500, description="URL complète du dépôt GitHub ou nom de l'image Docker")
     scan_type: str = Field(
         default="standard",
         description="Type de scan : standard (rapide via OSV) ou deep (complet via NVD)",
         examples=["standard", "deep"],
     )
+    target_type: str = Field(
+        default="github",
+        description="Type de cible : github ou docker",
+        examples=["github", "docker"],
+    )
+
+class AnalysisRequest(AnalysisBase):
+    """
+    Schema d'entrée pour lancer une analyse.
+    """
+    pass
 
 
 # ============================================================
@@ -93,34 +96,25 @@ class ReportResponse(BaseModel):
 # ============================================================
 
 
-class AnalysisListResponse(BaseModel):
+class AnalysisListResponse(AnalysisBase):
     """
     Version résumée d'une analyse — utilisée pour l'historique (GET /analyses).
     Ne contient PAS les dépendances ni les vulnérabilités (trop lourd).
     """
     id: int
-    repo_url: str
     repo_name: str
     status: str
     security_score: float | None = None
-    scan_type: str
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
 
 
-class AnalysisDetailResponse(BaseModel):
+class AnalysisDetailResponse(AnalysisListResponse):
     """
     Détail complet d'une analyse — utilisé pour GET /analyses/{id}.
     Contient TOUT : dépendances, vulnérabilités, Docker, recommandations, rapports.
     """
-    id: int
-    repo_url: str
-    repo_name: str
-    status: str
-    security_score: float | None = None
-    scan_type: str
-    created_at: datetime
     dependencies: list[DependencyResponse] = []
     docker_result: DockerResultResponse | None = None
     recommendations: list[RecommendationResponse] = []

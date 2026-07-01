@@ -1,898 +1,1239 @@
-<!DOCTYPE html>
-<html lang="fr">
+  <!DOCTYPE html>
+  <html lang="fr">
 
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
-  <title>Supply Chain Security — Interface de Test</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
-    rel="stylesheet" />
-  <style>
-    :root {
-      --dark: #0a0e1a;
-      --card: #111827;
-      --border: #1f2937
-    }
-
-    * {
-      font-family: Inter, sans-serif
-    }
-
-    body {
-      background: var(--dark);
-      color: #e5e7eb;
-      min-height: 100vh
-    }
-
-    .top-nav {
-      background: rgba(10, 14, 26, .97);
-      border-bottom: 1px solid var(--border);
-      position: sticky;
-      top: 0;
-      z-index: 100
-    }
-
-    .brand {
-      background: linear-gradient(135deg, #3b82f6, #8b5cf6);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      font-weight: 800;
-      font-size: 1.2rem
-    }
-
-    .hero {
-      background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
-      border-bottom: 1px solid var(--border);
-      padding: 2.5rem 0 2rem
-    }
-
-    .hero h1 {
-      font-size: 2rem;
-      font-weight: 800;
-      background: linear-gradient(135deg, #60a5fa, #a78bfa, #34d399);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent
-    }
-
-    .card-dark {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 12px
-    }
-
-    .chdr {
-      background: rgba(255, 255, 255, .03);
-      border-bottom: 1px solid var(--border);
-      font-weight: 600;
-      font-size: .92rem;
-      padding: .85rem 1.2rem;
-      display: flex;
-      align-items: center;
-      gap: .5rem
-    }
-
-    .inp {
-      background: #1f2937;
-      border: 1px solid #374151;
-      color: #e5e7eb;
-      border-radius: 8px
-    }
-
-    .inp:focus {
-      background: #1f2937;
-      border-color: #3b82f6;
-      color: #e5e7eb;
-      box-shadow: 0 0 0 3px rgba(59, 130, 246, .15)
-    }
-
-    .inp::placeholder {
-      color: #6b7280
-    }
-
-    .sel {
-      background: #1f2937;
-      border: 1px solid #374151;
-      color: #e5e7eb
-    }
-
-    .sel:focus {
-      background: #1f2937;
-      border-color: #3b82f6;
-      color: #e5e7eb;
-      box-shadow: 0 0 0 3px rgba(59, 130, 246, .15)
-    }
-
-    .score-circle {
-      width: 130px;
-      height: 130px;
-      border-radius: 50%;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      border: 6px solid
-    }
-
-    .sc-excellent {
-      border-color: #10b981;
-      color: #10b981;
-      background: rgba(16, 185, 129, .08)
-    }
-
-    .sc-bon {
-      border-color: #34d399;
-      color: #34d399;
-      background: rgba(52, 211, 153, .08)
-    }
-
-    .sc-moyen {
-      border-color: #f59e0b;
-      color: #f59e0b;
-      background: rgba(245, 158, 11, .08)
-    }
-
-    .sc-mauvais {
-      border-color: #f97316;
-      color: #f97316;
-      background: rgba(249, 115, 22, .08)
-    }
-
-    .sc-critique {
-      border-color: #ef4444;
-      color: #ef4444;
-      background: rgba(239, 68, 68, .08)
-    }
-
-    .sb {
-      font-size: .78rem;
-      padding: 3px 12px;
-      border-radius: 20px;
-      font-weight: 600
-    }
-
-    .sb-pending {
-      background: rgba(245, 158, 11, .15);
-      color: #f59e0b;
-      border: 1px solid rgba(245, 158, 11, .3)
-    }
-
-    .sb-running {
-      background: rgba(59, 130, 246, .15);
-      color: #60a5fa;
-      border: 1px solid rgba(59, 130, 246, .3)
-    }
-
-    .sb-done {
-      background: rgba(16, 185, 129, .15);
-      color: #10b981;
-      border: 1px solid rgba(16, 185, 129, .3)
-    }
-
-    .sb-failed {
-      background: rgba(239, 68, 68, .15);
-      color: #f87171;
-      border: 1px solid rgba(239, 68, 68, .3)
-    }
-
-    .cv-crit {
-      color: #f87171;
-      font-weight: 700
-    }
-
-    .cv-high {
-      color: #fb923c;
-      font-weight: 700
-    }
-
-    .cv-med {
-      color: #fbbf24;
-      font-weight: 600
-    }
-
-    .cv-low {
-      color: #9ca3af
-    }
-
-    .tbl {
-      color: #e5e7eb;
-      font-size: .86rem
-    }
-
-    .tbl thead th {
-      background: rgba(255, 255, 255, .04);
-      border-color: var(--border);
-      color: #9ca3af;
-      font-weight: 600;
-      font-size: .74rem;
-      text-transform: uppercase;
-      letter-spacing: .5px
-    }
-
-    .tbl tbody tr {
-      border-color: #1f2937;
-      transition: background .15s
-    }
-
-    .tbl tbody tr:hover {
-      background: rgba(255, 255, 255, .03)
-    }
-
-    .tbl td {
-      border-color: #1f2937;
-      vertical-align: middle
-    }
-
-    .rec-card {
-      background: rgba(59, 130, 246, .05);
-      border: 1px solid rgba(59, 130, 246, .15);
-      border-radius: 10px;
-      padding: .9rem 1.1rem;
-      margin-bottom: .6rem
-    }
-
-    .tag-g {
-      background: rgba(139, 92, 246, .2);
-      color: #a78bfa;
-      border-radius: 12px;
-      padding: 2px 10px;
-      font-size: .7rem;
-      font-weight: 600
-    }
-
-    .tag-o {
-      background: rgba(16, 185, 129, .2);
-      color: #34d399;
-      border-radius: 12px;
-      padding: 2px 10px;
-      font-size: .7rem;
-      font-weight: 600
-    }
-
-    .tag-s {
-      background: rgba(156, 163, 175, .2);
-      color: #9ca3af;
-      border-radius: 12px;
-      padding: 2px 10px;
-      font-size: .7rem;
-      font-weight: 600
-    }
-
-    .hist-item {
-      background: rgba(255, 255, 255, .02);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: .8rem 1.1rem;
-      margin-bottom: .5rem;
-      cursor: pointer;
-      transition: all .2s
-    }
-
-    .hist-item:hover {
-      background: rgba(59, 130, 246, .05);
-      border-color: rgba(59, 130, 246, .3);
-      transform: translateX(3px)
-    }
-
-    .docker-c {
-      background: rgba(14, 165, 233, .05);
-      border: 1px solid rgba(14, 165, 233, .2);
-      border-radius: 10px;
-      padding: 1.1rem
-    }
-
-    .pg-dark {
-      background: #1f2937;
-      border-radius: 8px
-    }
-
-    .dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      display: inline-block
-    }
-
-    .dot-g {
-      background: #10b981;
-      box-shadow: 0 0 6px #10b981
-    }
-
-    .dot-r {
-      background: #ef4444;
-      box-shadow: 0 0 6px #ef4444
-    }
-
-    .dot-y {
-      background: #f59e0b;
-      box-shadow: 0 0 6px #f59e0b
-    }
-
-    @keyframes pulse {
-
-      0%,
-      100% {
-        opacity: 1
+  <head>
+    <meta charset="UTF-8">
+    <title>Supply Chain Security </title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+      :root {
+        --primary: #2563eb;
+        --primary-dark: #1d4ed8;
+        --success: #10b981;
+        --warning: #f59e0b;
+        --danger: #ef4444;
+        --orange: #f97316;
+        --bg: #f1f5f9;
+        --surface: #ffffff;
+        --surface2: #f8fafc;
+        --text: #0f172a;
+        --muted: #64748b;
+        --border: #e2e8f0;
+        --radius: 12px;
+        --shadow: 0 1px 4px rgba(0, 0, 0, .08);
       }
 
-      50% {
-        opacity: .5
+      * {
+        box-sizing: border-box;
       }
-    }
 
-    .pulse {
-      animation: pulse 1.5s ease-in-out infinite
-    }
+      body {
+        font-family: 'Inter', sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        min-height: 100vh;
+      }
 
-    .tw {
-      position: fixed;
-      top: 72px;
-      right: 16px;
-      z-index: 9999;
-      min-width: 300px
-    }
+      /* NAV */
+      .topbar {
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+        padding: .75rem 1.5rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
 
-    .ti {
-      background: #1f2937;
-      border: 1px solid #374151;
-      border-radius: 10px;
-      margin-bottom: 8px
-    }
+      .topbar-brand {
+        font-weight: 800;
+        font-size: 1.1rem;
+        color: var(--primary);
+        display: flex;
+        align-items: center;
+        gap: .5rem;
+      }
 
-    .tab-btn {
-      padding: 10px 14px;
-      border: none;
-      background: transparent;
-      color: #6b7280;
-      font-size: .86rem;
-      cursor: pointer;
-      border-bottom: 2px solid transparent;
-      transition: color .15s
-    }
+      .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--success);
+        display: inline-block;
+        animation: pulse 2s infinite;
+      }
 
-    .tab-btn.active {
-      color: #e5e7eb;
-      border-bottom: 2px solid #3b82f6
-    }
+      @keyframes pulse {
 
-    .tab-btn:hover {
-      color: #9ca3af
-    }
-  </style>
-</head>
+        0%,
+        100% {
+          opacity: 1
+        }
 
-<body>
+        50% {
+          opacity: .4
+        }
+      }
 
-  <!-- NAV -->
-  <nav class="top-nav d-flex align-items-center justify-content-between px-4 py-2">
-    <span class="brand"><i class="bi bi-shield-check me-2"></i>Supply Chain Security Platform</span>
-    <div class="d-flex align-items-center gap-3">
-      <span class="d-flex align-items-center gap-2" style="font-size:.82rem">
-        <span class="dot dot-y pulse" id="stDot"></span>
-        <span id="stTxt" class="text-muted">Connexion...</span>
-      </span>
-      <a href="http://localhost:8000/docs" target="_blank" class="btn btn-sm btn-outline-secondary"><i
-          class="bi bi-code-square me-1"></i>Swagger</a>
-    </div>
-  </nav>
+      /* LAYOUT */
+      .main {
+        display: grid;
+        grid-template-columns: 380px 1fr;
+        gap: 1.25rem;
+        padding: 1.25rem;
+        max-width: 1600px;
+        margin: 0 auto;
+      }
 
-  <!-- HERO -->
-  <div class="hero">
-    <div class="container">
-      <h1 class="mb-2"><i class="bi bi-shield-shaded me-2"></i>Audit Securite Supply Chain</h1>
-      <p class="text-muted mb-3" style="font-size:1rem">Detectez les CVE, analysez Docker, obtenez des recommandations
-        IA et generez un rapport PDF.</p>
-      <div class="d-flex gap-2 flex-wrap">
-        <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 px-3 py-2"><i
-            class="bi bi-bug me-1"></i>OSV + NVD</span>
-        <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 px-3 py-2"><i
-            class="bi bi-hdd-stack me-1"></i>Docker/Trivy</span>
-        <span class="badge px-3 py-2"
-          style="background:rgba(139,92,246,.1);color:#a78bfa;border:1px solid rgba(139,92,246,.3)"><i
-            class="bi bi-robot me-1"></i>Gemini AI</span>
-        <span class="badge bg-warning bg-opacity-10 text-warning border border-warning border-opacity-25 px-3 py-2"><i
-            class="bi bi-file-pdf me-1"></i>Rapport PDF</span>
+      /* CARD */
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+        margin-bottom: 1.25rem;
+        overflow: hidden;
+      }
+
+      .card-hd {
+        padding: .875rem 1.25rem;
+        border-bottom: 1px solid var(--border);
+        font-weight: 600;
+        font-size: .9rem;
+        display: flex;
+        align-items: center;
+        gap: .5rem;
+      }
+
+      .card-bd {
+        padding: 1.25rem;
+      }
+
+      /* TABS */
+      .tab-nav {
+        display: flex;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface2);
+      }
+
+      .tab-btn {
+        flex: 1;
+        padding: .75rem;
+        text-align: center;
+        border: none;
+        background: none;
+        font-weight: 600;
+        font-size: .85rem;
+        color: var(--muted);
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+        transition: .2s;
+      }
+
+      .tab-btn:hover {
+        color: var(--text);
+      }
+
+      .tab-btn.active {
+        color: var(--primary);
+        border-bottom-color: var(--primary);
+        background: var(--surface);
+      }
+
+      .tab-pane {
+        display: none;
+        padding: 1.25rem;
+      }
+
+      .tab-pane.active {
+        display: block;
+      }
+
+      /* SCAN TYPE SELECTOR (Standard/Deep) */
+      .scan-type-group {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: .5rem;
+        margin-bottom: 1rem;
+      }
+
+      .scan-type-btn {
+        border: 2px solid var(--border);
+        border-radius: 8px;
+        padding: .6rem .75rem;
+        cursor: pointer;
+        background: var(--surface2);
+        transition: .2s;
+        text-align: left;
+      }
+
+      .scan-type-btn:hover {
+        border-color: var(--primary);
+        background: #eff6ff;
+      }
+
+      .scan-type-btn.selected {
+        border-color: var(--primary);
+        background: #eff6ff;
+      }
+
+      .scan-type-btn .label {
+        font-weight: 700;
+        font-size: .85rem;
+        color: var(--text);
+      }
+
+      .scan-type-btn .desc {
+        font-size: .73rem;
+        color: var(--muted);
+        margin-top: 2px;
+      }
+
+      .scan-type-btn i {
+        color: var(--primary);
+      }
+
+      /* FORM */
+      .form-label-sm {
+        font-size: .75rem;
+        font-weight: 700;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: .04em;
+        margin-bottom: .35rem;
+        display: block;
+      }
+
+      .form-control {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: .55rem .85rem;
+        font-size: .9rem;
+        width: 100%;
+        transition: .2s;
+      }
+
+      .form-control:focus {
+        outline: none;
+        border-color: var(--primary);
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, .12);
+      }
+
+      .btn-primary-full {
+        width: 100%;
+        background: var(--primary);
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        padding: .65rem 1rem;
+        font-weight: 700;
+        font-size: .9rem;
+        cursor: pointer;
+        transition: .2s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: .4rem;
+      }
+
+      .btn-primary-full:hover {
+        background: var(--primary-dark);
+      }
+
+      .btn-primary-full:disabled {
+        opacity: .6;
+        cursor: not-allowed;
+      }
+
+      /* BADGE */
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: .25rem;
+        padding: .3rem .6rem;
+        border-radius: 20px;
+        font-size: .73rem;
+        font-weight: 700;
+      }
+
+      .badge-pending {
+        background: #f1f5f9;
+        color: #475569;
+      }
+
+      .badge-running {
+        background: #dbeafe;
+        color: #1e40af;
+      }
+
+      .badge-done {
+        background: #d1fae5;
+        color: #065f46;
+      }
+
+      .badge-failed {
+        background: #fee2e2;
+        color: #991b1b;
+      }
+
+      .badge-standard {
+        background: #f0fdf4;
+        color: #15803d;
+        border: 1px solid #bbf7d0;
+      }
+
+      .badge-deep {
+        background: #faf5ff;
+        color: #7c3aed;
+        border: 1px solid #ddd6fe;
+      }
+
+      /* HISTORY */
+      .hist-item {
+        padding: .75rem 1.25rem;
+        border-bottom: 1px solid var(--border);
+        cursor: pointer;
+        transition: .15s;
+      }
+
+      .hist-item:hover {
+        background: var(--surface2);
+      }
+
+      .hist-item:last-child {
+        border-bottom: none;
+      }
+
+      .hist-name {
+        font-weight: 600;
+        font-size: .9rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 180px;
+      }
+
+      .hist-meta {
+        font-size: .73rem;
+        color: var(--muted);
+      }
+
+      /* ACTIVE TRACKER */
+      .tracker {
+        border: 2px solid var(--warning);
+        border-radius: var(--radius);
+        background: #fffbeb;
+        padding: 1rem;
+        margin-bottom: 1.25rem;
+        display: none;
+      }
+
+      /* SCORE CIRCLE */
+      .score-ring {
+        width: 110px;
+        height: 110px;
+        border-radius: 50%;
+        border: 5px solid var(--border);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        font-size: 2rem;
+        font-weight: 800;
+        margin: 0 auto;
+        transition: .3s;
+      }
+
+      /* RISK MATRIX */
+      .matrix-wrap {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+      }
+
+      .matrix-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 40px);
+        grid-template-rows: repeat(3, 40px);
+        gap: 2px;
+      }
+
+      .mc {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: .8rem;
+        font-weight: 700;
+        color: #fff;
+        border-radius: 4px;
+      }
+
+      .mc-empty {
+        background: #e2e8f0;
+        color: #94a3b8;
+      }
+
+      .mc-L {
+        background: var(--success);
+      }
+
+      .mc-M {
+        background: var(--warning);
+        color: var(--text);
+      }
+
+      .mc-H {
+        background: var(--orange);
+      }
+
+      .mc-C {
+        background: var(--danger);
+      }
+
+      .axis-lbl {
+        font-size: .65rem;
+        font-weight: 700;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: .04em;
+      }
+
+      /* RESULTS TABLE */
+      .res-table {
+        width: 100%;
+        font-size: .85rem;
+        border-collapse: collapse;
+      }
+
+      .res-table th {
+        background: var(--surface2);
+        color: var(--muted);
+        font-weight: 700;
+        font-size: .75rem;
+        text-transform: uppercase;
+        padding: .5rem .75rem;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .res-table td {
+        padding: .6rem .75rem;
+        border-bottom: 1px solid var(--border);
+        vertical-align: middle;
+      }
+
+      .res-table tbody tr:hover {
+        background: #f8fafc;
+      }
+
+      .res-table tbody tr:last-child td {
+        border-bottom: none;
+      }
+
+      /* REC CARD */
+      .rec-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1rem;
+        margin-bottom: .75rem;
+      }
+
+      .rec-type {
+        display: inline-flex;
+        align-items: center;
+        gap: .3rem;
+        font-size: .72rem;
+        font-weight: 700;
+        padding: .25rem .5rem;
+        border-radius: 4px;
+        text-transform: uppercase;
+        margin-bottom: .5rem;
+      }
+
+      .rec-type-dependency {
+        background: #eff6ff;
+        color: #1e40af;
+      }
+
+      .rec-type-docker {
+        background: #f0fdf4;
+        color: #15803d;
+      }
+
+      .rec-type-global {
+        background: #faf5ff;
+        color: #7c3aed;
+      }
+
+      .rec-type-code {
+        background: #fff7ed;
+        color: #c2410c;
+      }
+
+      .rec-text {
+        font-size: .88rem;
+        color: var(--text);
+        line-height: 1.55;
+      }
+
+      /* DETAIL TABS */
+      .detail-tabs {
+        display: flex;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface);
+      }
+
+      .detail-tab {
+        padding: .75rem 1.2rem;
+        border: none;
+        background: none;
+        font-weight: 600;
+        font-size: .85rem;
+        color: var(--muted);
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+        transition: .2s;
+      }
+
+      .detail-tab.active {
+        color: var(--primary);
+        border-bottom-color: var(--primary);
+      }
+
+      .detail-pane {
+        display: none;
+        padding: 1.25rem;
+        background: var(--surface2);
+      }
+
+      .detail-pane.active {
+        display: block;
+      }
+
+      /* WELCOME */
+      .welcome {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 400px;
+        text-align: center;
+        color: var(--muted);
+      }
+
+      .welcome i {
+        font-size: 5rem;
+        opacity: .15;
+        color: var(--primary);
+        margin-bottom: 1rem;
+      }
+
+      /* TOAST */
+      #toasts {
+        position: fixed;
+        bottom: 1rem;
+        right: 1rem;
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        gap: .5rem;
+      }
+
+      .toast {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: .75rem 1rem;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, .15);
+        display: flex;
+        align-items: flex-start;
+        gap: .5rem;
+        max-width: 320px;
+        animation: slideIn .2s;
+      }
+
+      @keyframes slideIn {
+        from {
+          transform: translateX(20px);
+          opacity: 0
+        }
+
+        to {
+          transform: none;
+          opacity: 1
+        }
+      }
+
+      .toast-success {
+        border-left: 3px solid var(--success);
+      }
+
+      .toast-danger {
+        border-left: 3px solid var(--danger);
+      }
+
+      .toast-info {
+        border-left: 3px solid var(--primary);
+      }
+
+      .toast-title {
+        font-weight: 700;
+        font-size: .85rem;
+      }
+
+      .toast-msg {
+        font-size: .8rem;
+        color: var(--muted);
+      }
+
+      .spinner-sm {
+        width: 1rem;
+        height: 1rem;
+        border: 2px solid currentColor;
+        border-right-color: transparent;
+        border-radius: 50%;
+        animation: spin .6s linear infinite;
+        display: inline-block;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg)
+        }
+      }
+
+      .empty-state {
+        text-align: center;
+        padding: 3rem;
+        color: var(--muted);
+      }
+
+      .empty-state i {
+        font-size: 2.5rem;
+        opacity: .3;
+        display: block;
+        margin-bottom: .75rem;
+      }
+    </style>
+  </head>
+
+  <body>
+
+    <!-- TOP BAR -->
+    <div class="topbar">
+      <div class="topbar-brand">
+        <i class="bi bi-shield-shaded"></i>
+        Supply Chain Security
+      </div>
+      <div style="display:flex;align-items:center;gap:.75rem">
+        <span id="apiBadge"
+          style="display:flex;align-items:center;gap:.4rem;font-size:.8rem;font-weight:600;color:var(--success)">
+          <span class="status-dot"></span> API en ligne
+        </span>
+        <a href="http://localhost:8000/docs" target="_blank" class="btn btn-sm btn-outline-secondary">
+          <i class="bi bi-book me-1"></i>Swagger
+        </a>
       </div>
     </div>
-  </div>
 
-  <div class="tw" id="tw"></div>
+    <div class="main">
 
-  <div class="container py-4">
-    <div class="row g-4">
+      <!-- ========== COLONNE GAUCHE ========== -->
+      <div>
 
-      <!-- GAUCHE -->
-      <div class="col-lg-5">
+        <!-- LANCER UNE ANALYSE -->
+        <div class="card">
+          <div class="card-hd"><i class="bi bi-play-circle text-primary"></i> Nouvelle Analyse</div>
 
-        <!-- FORMULAIRE -->
-        <div class="card-dark mb-4">
-          <div class="chdr"><i class="bi bi-search text-primary"></i>Lancer une Analyse</div>
-          <div class="p-4">
-            <div class="mb-3">
-              <label class="form-label text-muted small fw-semibold">URL du Depot GitHub</label>
-              <input type="url" id="repoUrl" class="form-control inp" placeholder="https://github.com/owner/repo" />
-            </div>
-            <div class="mb-3">
-              <label class="form-label text-muted small fw-semibold">Type de Scan</label>
-              <select id="scanType" class="form-select sel">
-                <option value="standard">Standard — rapide via OSV (recommande)</option>
-                <option value="deep">Deep — complet via NVD (plus lent)</option>
-              </select>
-            </div>
-            <div class="mb-4">
-              <div class="text-muted small fw-semibold mb-2">Exemples rapides :</div>
-              <div class="d-flex flex-wrap gap-2">
-                <button class="btn btn-sm btn-outline-secondary"
-                  onclick="setUrl('https://github.com/fastapi/fastapi')">fastapi</button>
-                <button class="btn btn-sm btn-outline-secondary"
-                  onclick="setUrl('https://github.com/django/django')">django</button>
-                <button class="btn btn-sm btn-outline-secondary"
-                  onclick="setUrl('https://github.com/expressjs/express')">express</button>
-                <button class="btn btn-sm btn-outline-secondary"
-                  onclick="setUrl('https://github.com/pallets/flask')">flask</button>
+          <div class="tab-nav">
+            <button class="tab-btn active" onclick="switchTab('repo')">
+              <i class="bi bi-github me-1"></i>GitHub Repo
+            </button>
+            <button class="tab-btn" onclick="switchTab('docker')">
+              <i class="bi bi-box-seam me-1"></i>Image Docker
+            </button>
+          </div>
+
+          <!-- TAB GITHUB -->
+          <div class="tab-pane active" id="tab-repo">
+            <label class="form-label-sm">Type de scan</label>
+            <div class="scan-type-group" style="margin-bottom:1rem">
+              <div class="scan-type-btn selected" id="btn-standard" onclick="selectScanType('standard')">
+                <div class="label"><i class="bi bi-lightning-charge"></i> Standard</div>
+                <div class="desc">Rapide via OSV (~1–2 min).</div>
+              </div>
+              <div class="scan-type-btn" id="btn-deep" onclick="selectScanType('deep')">
+                <div class="label"><i class="bi bi-microscope"></i> Deep</div>
+                <div class="desc">Complet via NVD + OSV (~5–10 min). Plus précis.</div>
               </div>
             </div>
-            <button id="analyzeBtn" class="btn btn-primary w-100 fw-semibold py-2" onclick="startAnalysis()">
-              <i class="bi bi-play-fill me-2"></i>Lancer l'Analyse
+            <label class="form-label-sm">URL du dépôt GitHub</label>
+            <input id="repoUrl" class="form-control" type="url" placeholder="https://github.com/utilisateur/depot"
+              style="margin-bottom:.75rem">
+            <button class="btn-primary-full" id="btnRepo" onclick="launchRepo()">
+              <i class="bi bi-search"></i> Analyser le Repo
+            </button>
+          </div>
+
+          <!-- TAB DOCKER -->
+          <div class="tab-pane" id="tab-docker">
+            <label class="form-label-sm">Nom de l'image (Docker Hub)</label>
+            <input id="imgName" class="form-control" type="text"
+              placeholder="ex: vulnerables/web-dvwa  ou  python:3.12-slim" style="margin-bottom:.5rem">
+            <p style="font-size:.75rem;color:var(--muted);margin-bottom:.75rem;">
+              <i class="bi bi-info-circle me-1"></i>
+              Entrez uniquement le nom de l'image (sans <code>docker pull</code>). Trivy se charge du reste.
+            </p>
+            <button class="btn-primary-full" id="btnDocker" onclick="launchDocker()">
+              <i class="bi bi-search"></i> Scanner l'image
             </button>
           </div>
         </div>
 
-        <!-- SCANNER IMAGE DOCKER HUB -->
-        <div class="card-dark mb-4" style="border-color:rgba(14,165,233,.3)">
-          <div class="chdr" style="background:rgba(14,165,233,.05);border-color:rgba(14,165,233,.2)">
-            <i class="bi bi-hdd-stack" style="color:#38bdf8"></i>
-            <span style="color:#38bdf8">Scanner une Image Docker Hub</span>
-          </div>
-          <div class="p-4">
-            <div class="mb-3">
-              <label class="form-label text-muted small fw-semibold">Nom de l'Image Docker</label>
-              <input type="text" id="imgInput" class="form-control inp" placeholder="ex: vulnerables/web-dvwa"/>
+        <!-- TRACKER -->
+        <div class="tracker" id="tracker">
+          <div style="display:flex;align-items:center;gap:.75rem">
+            <span class="spinner-sm" style="color:var(--warning)"></span>
+            <div>
+              <div style="font-weight:700;font-size:.9rem" id="trackerName">…</div>
+              <div style="font-size:.78rem;color:var(--muted)" id="trackerStatus">En attente…</div>
             </div>
-            <div class="mb-3">
-              <div class="text-muted small fw-semibold mb-2">Images de test :</div>
-              <div class="d-flex flex-wrap gap-2">
-                <button class="btn btn-sm" style="background:rgba(239,68,68,.1);color:#f87171;border:1px solid rgba(239,68,68,.3)"
-                  onclick="setImg('vulnerables/web-dvwa')">
-                  <i class="bi bi-bug me-1"></i>web-dvwa
-                </button>
-                <button class="btn btn-sm btn-outline-secondary" onclick="setImg('python:3.12-slim')">python:3.12-slim</button>
-                <button class="btn btn-sm btn-outline-secondary" onclick="setImg('node:18-alpine')">node:18-alpine</button>
-                <button class="btn btn-sm btn-outline-secondary" onclick="setImg('ubuntu:22.04')">ubuntu:22.04</button>
-              </div>
-            </div>
-            <button id="imgScanBtn" class="btn w-100 fw-semibold py-2" style="background:#0284c7;color:white" onclick="scanImage()">
-              <i class="bi bi-hdd-stack me-2"></i>Scanner l'Image
-            </button>
-
-            <!-- Résultat du scan image -->
-            <div id="imgResult" style="display:none" class="mt-3">
-              <hr style="border-color:#1f2937"/>
-              <div class="d-flex align-items-center gap-3 mb-3">
-                <div id="imgScoreCircle" class="score-circle" style="width:90px;height:90px;border-color:#6b7280">
-                  <div style="font-size:1.6rem;font-weight:800;line-height:1" id="imgScoreVal">-</div>
-                  <div style="font-size:.6rem;opacity:.8">/100</div>
-                </div>
-                <div>
-                  <div class="fw-semibold" id="imgNameLbl" style="color:#38bdf8;font-size:.9rem">-</div>
-                  <div class="text-muted small" id="imgVulnLbl">-</div>
-                </div>
-              </div>
-              <div class="d-flex flex-wrap gap-2" id="imgSevBadges"></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- SUIVI -->
-
-        <div class="card-dark mb-4" id="trackCard" style="display:none">
-          <div class="chdr"><i class="bi bi-activity text-warning pulse"></i>Analyse en cours<span class="ms-auto sb"
-              id="trackBadge">PENDING</span></div>
-          <div class="p-4">
-            <div class="d-flex justify-content-between text-muted small mb-2">
-              <span id="trackRepo">—</span><span>ID #<span id="trackId">—</span></span>
-            </div>
-            <div class="progress pg-dark mb-2" style="height:6px">
-              <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary" id="trackBar"
-                style="width:5%"></div>
-            </div>
-            <div class="text-muted small text-center" id="trackStep">Initialisation...</div>
-            <div class="text-center mt-2"><small class="text-muted" style="font-size:.71rem">Mise a jour toutes les 3
-                secondes</small></div>
           </div>
         </div>
 
         <!-- HISTORIQUE -->
-        <div class="card-dark">
-          <div class="chdr"><i class="bi bi-clock-history text-info"></i>Historique<button
-              class="btn btn-sm btn-outline-secondary ms-auto" onclick="loadHistory()"><i
-                class="bi bi-arrow-clockwise"></i></button></div>
-          <div class="p-3" id="histBox">
-            <div class="text-center text-muted py-3 small"><i class="bi bi-inbox" style="font-size:2rem;opacity:.3"></i>
-              <div class="mt-2">Chargement...</div>
+        <div class="card">
+          <div class="card-hd" style="justify-content:space-between">
+            <span><i class="bi bi-clock-history text-secondary"></i> Historique</span>
+            <button onclick="reloadHistory()"
+              style="background:none;border:1px solid var(--border);border-radius:6px;padding:.2rem .5rem;cursor:pointer;font-size:.8rem;color:var(--muted)">
+              <i class="bi bi-arrow-clockwise"></i>
+            </button>
+          </div>
+          <div class="tab-nav" id="histTabNav">
+            <button class="tab-btn active" id="histTabRepo" onclick="switchHist('github')">
+              <i class="bi bi-github me-1"></i>Repos
+            </button>
+            <button class="tab-btn" id="histTabDocker" onclick="switchHist('docker')">
+              <i class="bi bi-box-seam me-1"></i>Images
+            </button>
+          </div>
+          <div id="histList" style="max-height:380px;overflow-y:auto;"></div>
+        </div>
+
+      </div>
+
+      <!-- ========== COLONNE DROITE — RÉSULTATS ========== -->
+      <div id="rightPanel">
+        <div class="welcome" id="welcomeMsg">
+          <i class="bi bi-shield-check"></i>
+          <h5 style="font-weight:700;color:var(--text)">Prêt à analyser</h5>
+          <p style="max-width:380px">Lancez un scan à gauche ou cliquez sur un élément de l'historique pour afficher les
+            résultats.</p>
+        </div>
+
+        <div id="resultPanel" style="display:none">
+
+          <!-- OVERVIEW -->
+          <div class="card" style="margin-bottom:1.25rem">
+            <div class="card-bd">
+              <div style="display:grid;grid-template-columns:auto 1fr auto;gap:1.5rem;align-items:center">
+                <!-- Score -->
+                <div style="text-align:center">
+                  <div class="score-ring" id="scoreRing">
+                    <span id="scoreVal">—</span>
+                  </div>
+                  <div
+                    style="font-size:.72rem;font-weight:700;margin-top:.4rem;text-transform:uppercase;letter-spacing:.04em"
+                    id="riskLbl">Risque inconnu</div>
+                </div>
+                <!-- Info -->
+                <div>
+                  <h4 style="font-weight:800;margin:0 0 .4rem" id="resName">—</h4>
+                  <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.5rem">
+                    <span id="resStatus"></span>
+                    <span id="resScanType"></span>
+                    <span id="resTypeTag"></span>
+                  </div>
+                  <div style="font-size:.78rem;color:var(--muted)">
+                    <i class="bi bi-clock me-1"></i><span id="resDate">—</span>
+                  </div>
+                </div>
+                <!-- Matrice -->
+                <div class="matrix-wrap">
+                  <span class="axis-lbl" style="margin-bottom:2px">Sévérité ↑</span>
+                  <div class="matrix-grid" id="matrixGrid">
+                    <!-- row 3: HIGH severity -->
+                    <div class="mc mc-empty" id="m33">0</div>
+                    <div class="mc mc-C" id="m32">0</div>
+                    <div class="mc mc-C" id="m31">0</div>
+                    <!-- row 2: MED severity -->
+                    <div class="mc mc-empty" id="m23">0</div>
+                    <div class="mc mc-empty" id="m22">0</div>
+                    <div class="mc mc-H" id="m21">0</div>
+                    <!-- row 1: LOW severity -->
+                    <div class="mc mc-empty" id="m13">0</div>
+                    <div class="mc mc-empty" id="m12">0</div>
+                    <div class="mc mc-empty" id="m11">0</div>
+                  </div>
+                  <span class="axis-lbl" style="margin-top:2px">→ Exploitabilité</span>
+                </div>
+              </div>
             </div>
           </div>
+
+          <!-- DETAIL TABS -->
+          <div class="card" style="overflow:visible">
+            <div class="detail-tabs">
+              <button class="detail-tab active" onclick="showDetailTab('recs')"><i
+                  class="bi bi-robot me-1"></i>Recommandations IA <span class="badge badge-standard ms-1"
+                  id="cntRecs">0</span></button>
+              <button class="detail-tab" onclick="showDetailTab('vulns')"><i class="bi bi-bug me-1"></i>Vulnérabilités
+                <span class="badge badge-standard ms-1" id="cntVulns">0</span></button>
+              <button class="detail-tab" id="depsTabBtn" onclick="showDetailTab('deps')"><i
+                  class="bi bi-box-seam me-1"></i>Dépendances <span class="badge badge-standard ms-1"
+                  id="cntDeps">0</span></button>
+              <button class="detail-tab" id="dockerTabBtn" onclick="showDetailTab('dockerRes')"><i
+                  class="bi bi-hdd-network me-1"></i>Résultat Docker</button>
+            </div>
+
+            <!-- RECS -->
+            <div class="detail-pane active" id="pane-recs">
+              <div id="recsList"></div>
+            </div>
+            <!-- VULNS -->
+            <div class="detail-pane" id="pane-vulns">
+              <div style="overflow-x:auto">
+                <table class="res-table">
+                  <thead>
+                    <tr>
+                      <th>CVE</th>
+                      <th>Package</th>
+                      <th>Sévérité</th>
+                      <th>CVSS</th>
+                      <th>Patch dispo</th>
+                      <th>Exploit</th>
+                    </tr>
+                  </thead>
+                  <tbody id="vulnsTbody"></tbody>
+                </table>
+              </div>
+            </div>
+            <!-- DEPS -->
+            <div class="detail-pane" id="pane-deps">
+              <div style="overflow-x:auto">
+                <table class="res-table">
+                  <thead>
+                    <tr>
+                      <th>Package</th>
+                      <th>Version</th>
+                      <th>Écosystème</th>
+                      <th>Vulnérabilités</th>
+                      <th>Obsolète</th>
+                    </tr>
+                  </thead>
+                  <tbody id="depsTbody"></tbody>
+                </table>
+              </div>
+            </div>
+            <!-- DOCKER RESULT -->
+            <div class="detail-pane" id="pane-dockerRes">
+              <div id="dockerResContent"></div>
+            </div>
+          </div>
+
         </div>
       </div>
 
-      <!-- DROITE -->
-      <div class="col-lg-7">
-        <div id="empty" class="card-dark p-5 text-center">
-          <div style="font-size:5rem;opacity:.07">&#128202;</div>
-          <h5 class="text-muted mt-3">Aucun resultat</h5>
-          <p class="text-muted small">Lancez une analyse ou cliquez sur l'historique</p>
-        </div>
-
-        <div id="results" style="display:none">
-
-          <!-- SCORE -->
-          <div class="card-dark mb-4">
-            <div class="chdr"><i class="bi bi-bar-chart-fill text-primary"></i>Resultat<span class="ms-auto"
-                id="resSt"></span></div>
-            <div class="p-4">
-              <div class="row g-3 align-items-center">
-                <div class="col-auto">
-                  <div class="score-circle" id="scoreCircle">
-                    <div style="font-size:2.3rem;font-weight:800;line-height:1" id="scoreVal">-</div>
-                    <div style="font-size:.65rem;font-weight:600;letter-spacing:1px;opacity:.8">/ 100</div>
-                  </div>
-                </div>
-                <div class="col">
-                  <h5 class="mb-1 fw-bold" id="resName">-</h5>
-                  <div class="text-muted small mb-2" id="resUrl">-</div>
-                  <div class="d-flex flex-wrap gap-2" id="resStats"></div>
-                </div>
-              </div>
-              <div class="mt-3">
-                <div class="d-flex justify-content-between small text-muted mb-1">
-                  <span>Score de Securite</span><span id="scoreLbl">-</span>
-                </div>
-                <div class="progress pg-dark" style="height:10px">
-                  <div class="progress-bar" id="scoreBar" style="width:0%;border-radius:8px;transition:width 1.2s ease">
-                  </div>
-                </div>
-                <div class="d-flex justify-content-between small mt-1">
-                  <span class="text-danger">0 Critique</span><span class="text-warning">50 Moyen</span><span
-                    class="text-success">100 Excellent</span>
-                </div>
-              </div>
-              <div class="mt-3 d-flex gap-2">
-                <button class="btn btn-danger btn-sm" id="pdfBtn" onclick="downloadPDF()" style="display:none"><i
-                    class="bi bi-file-pdf me-1"></i>Telecharger PDF</button>
-                <button class="btn btn-outline-secondary btn-sm" onclick="loadDetail(curId)"><i
-                    class="bi bi-arrow-clockwise me-1"></i>Actualiser</button>
-              </div>
-            </div>
-          </div>
-
-          <!-- TABS -->
-          <div class="card-dark mb-4">
-            <div class="chdr p-0 ps-2 d-flex border-0" style="background:rgba(255,255,255,.03)">
-              <button class="tab-btn active" onclick="showTab('cve',this)"><i class="bi bi-bug me-1"></i>Vulnerabilites
-                <span class="badge bg-danger ms-1" id="bdgCve" style="display:none"></span></button>
-              <button class="tab-btn" onclick="showTab('deps',this)"><i class="bi bi-box me-1"></i>Dependances <span
-                  class="badge bg-secondary ms-1" id="bdgDeps" style="display:none"></span></button>
-              <button class="tab-btn" onclick="showTab('docker',this)"><i
-                  class="bi bi-hdd-stack me-1"></i>Docker</button>
-              <button class="tab-btn" onclick="showTab('ai',this)"><i class="bi bi-robot me-1"></i>IA <span
-                  class="badge ms-1" style="background:rgba(139,92,246,.3);color:#a78bfa" id="bdgAi"
-                  style="display:none"></span></button>
-            </div>
-            <div class="p-4">
-              <div id="tabCve">
-                <div class="d-flex justify-content-between align-items-center mb-3">
-                  <span class="text-muted small">CVE/GHSA triees par CVSS</span>
-                  <div id="cveSev" class="d-flex gap-1"></div>
-                </div>
-                <div style="max-height:360px;overflow-y:auto">
-                  <table class="table tbl">
-                    <thead>
-                      <tr>
-                        <th>ID CVE</th>
-                        <th>Dependance</th>
-                        <th>Severite</th>
-                        <th>CVSS</th>
-                        <th>Correctif</th>
-                      </tr>
-                    </thead>
-                    <tbody id="cveBody">
-                      <tr>
-                        <td colspan="5" class="text-center text-muted py-3">Aucune CVE detectee</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-              <div id="tabDeps" style="display:none">
-                <input type="text" class="form-control inp form-control-sm mb-3" id="depsFilter"
-                  placeholder="Filtrer..." oninput="filterDeps()" />
-                <div style="max-height:360px;overflow-y:auto">
-                  <table class="table tbl">
-                    <thead>
-                      <tr>
-                        <th>Nom</th>
-                        <th>Version</th>
-                        <th>Ecosysteme</th>
-                        <th>CVE</th>
-                        <th>Type</th>
-                      </tr>
-                    </thead>
-                    <tbody id="depsBody">
-                      <tr>
-                        <td colspan="5" class="text-center text-muted py-3">-</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-              <div id="tabDocker" style="display:none">
-                <div id="dockerBox">
-                  <div class="text-center text-muted py-4"><i class="bi bi-hdd-stack"
-                      style="font-size:2.5rem;opacity:.3"></i>
-                    <div class="mt-2 small">Aucun Dockerfile detecte</div>
-                  </div>
-                </div>
-              </div>
-              <div id="tabAi" style="display:none">
-                <div id="aiBox">
-                  <div class="text-center text-muted py-4 small">Aucune recommandation</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
-  </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-  <script>
-    const API = 'http://localhost:8000/api/v1';
-    let poll = null, curId = null, allDeps = [];
+    <div id="toasts"></div>
 
-    async function checkHealth() {
-      const dot = document.getElementById('stDot'), txt = document.getElementById('stTxt');
-      try {
-        const r = await fetch(API + '/health', { signal: AbortSignal.timeout(5000) });
-        const d = await r.json();
-        if (r.ok) { dot.className = 'dot dot-g'; txt.textContent = 'API connectee · DB: ' + d.database; txt.style.color = '#10b981'; loadHistory(); }
-        else throw new Error();
-      } catch { dot.className = 'dot dot-r'; txt.textContent = 'Backend non disponible'; txt.style.color = '#f87171'; toast('error', 'Backend hors ligne', 'Lancez: venv/Scripts/python.exe -m uvicorn app.main:app --reload --port 8000'); }
-    }
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+      const API = 'http://localhost:8000/api/v1';
+      let curTab = 'repo';
+      let curHistType = 'github';
+      let curScanType = 'standard';
+      let curAnalysisId = null;
+      let trackTimer = null;
 
-    async function startAnalysis() {
-      const url = document.getElementById('repoUrl').value.trim(), st = document.getElementById('scanType').value;
-      if (!url || !url.includes('github.com')) { toast('warning', 'URL invalide', 'Entrez une URL GitHub'); return; }
-      const btn = document.getElementById('analyzeBtn');
-      btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Envoi...';
-      try {
-        const r = await fetch(API + '/analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ repo_url: url, scan_type: st }) });
-        if (!r.ok) { const e = await r.json(); throw new Error(e.detail || 'Erreur ' + r.status); }
-        const a = await r.json();
-        toast('success', 'Analyse lancee !', 'ID #' + a.id + ' — ' + a.repo_name);
-        showTrack(a); startPoll(a.id); loadHistory();
-      } catch (e) { toast('error', 'Erreur', e.message); }
-      finally { btn.disabled = false; btn.innerHTML = '<i class="bi bi-play-fill me-2"></i>Lancer l\'Analyse'; }
-    }
-
-    function showTrack(a) {
-      document.getElementById('trackCard').style.display = 'block';
-      document.getElementById('trackRepo').textContent = a.repo_name;
-      document.getElementById('trackId').textContent = a.id;
-      document.getElementById('trackBar').style.width = '5%';
-      document.getElementById('trackStep').textContent = 'Initialisation...';
-      setBadge('trackBadge', a.status);
-    }
-
-    const SI = { PENDING: { p: 5, t: 'En file d\'attente...' }, RUNNING: { p: 55, t: 'Scan CVE, Docker, IA...' }, DONE: { p: 100, t: 'Termine avec succes !' }, FAILED: { p: 100, t: 'Echec de l\'analyse' } };
-
-    function startPoll(id) {
-      if (poll) clearInterval(poll);
-      poll = setInterval(async () => {
-        try {
-          const r = await fetch(API + '/analyses/' + id); if (!r.ok) return;
-          const d = await r.json();
-          setBadge('trackBadge', d.status);
-          const i = SI[d.status] || { p: 30, t: 'En cours...' };
-          document.getElementById('trackBar').style.width = i.p + '%';
-          document.getElementById('trackStep').textContent = i.t;
-          if (d.status === 'DONE' || d.status === 'FAILED') {
-            clearInterval(poll); poll = null;
-            if (d.status === 'DONE') { toast('success', 'Termine !', 'Score: ' + (d.security_score?.toFixed(1) || '-') + '/100'); loadDetail(id); }
-            else toast('error', 'Echec', 'Verifiez les logs du backend');
-            loadHistory();
-          }
-        } catch { }
-      }, 3000);
-    }
-
-    async function loadDetail(id) {
-      if (!id) return; curId = id;
-      try { const r = await fetch(API + '/analyses/' + id); if (!r.ok) throw new Error(); render(await r.json()); }
-      catch { toast('error', 'Erreur', 'Impossible de charger l\'analyse'); }
-    }
-
-    function render(d) {
-      document.getElementById('empty').style.display = 'none';
-      document.getElementById('results').style.display = 'block';
-      const s = d.security_score;
-      document.getElementById('scoreVal').textContent = s != null ? Math.round(s) : '-';
-      const c = document.getElementById('scoreCircle'); c.className = 'score-circle';
-      let cls = 'sc-critique', nm = 'CRITIQUE', col = '#ef4444';
-      if (s >= 90) { cls = 'sc-excellent'; nm = 'EXCELLENT'; col = '#10b981'; }
-      else if (s >= 70) { cls = 'sc-bon'; nm = 'BON'; col = '#34d399'; }
-      else if (s >= 50) { cls = 'sc-moyen'; nm = 'MOYEN'; col = '#f59e0b'; }
-      else if (s >= 30) { cls = 'sc-mauvais'; nm = 'MAUVAIS'; col = '#f97316'; }
-      if (s != null) c.classList.add(cls);
-      document.getElementById('scoreLbl').textContent = s != null ? (Math.round(s) + '/100 — ' + nm) : '-';
-      const bar = document.getElementById('scoreBar'); bar.style.background = col;
-      setTimeout(() => { bar.style.width = (s || 0) + '%'; }, 80);
-      document.getElementById('resName').textContent = d.repo_name || '-';
-      document.getElementById('resUrl').textContent = d.repo_url || '-';
-      document.getElementById('resSt').innerHTML = mkBadge(d.status);
-      const tc = d.dependencies?.reduce((a, x) => a + (x.vulnerabilities?.length || 0), 0) || 0;
-      const cc = d.dependencies?.reduce((a, x) => a + (x.vulnerabilities?.filter(v => v.severity === 'CRITICAL')?.length || 0), 0) || 0;
-      document.getElementById('resStats').innerHTML =
-        '<span class="badge" style="background:rgba(59,130,246,.1);color:#60a5fa;border:1px solid rgba(59,130,246,.3)"><i class="bi bi-box me-1"></i>' + (d.dependencies?.length || 0) + ' deps</span> ' +
-        '<span class="badge" style="background:rgba(239,68,68,.1);color:#f87171;border:1px solid rgba(239,68,68,.3)"><i class="bi bi-bug me-1"></i>' + tc + ' CVE</span>' +
-        (cc > 0 ? '<span class="badge" style="background:rgba(239,68,68,.2);color:#f87171;border:1px solid rgba(239,68,68,.5)">\u26A0\uFE0F ' + cc + ' CRITICAL</span>' : '') +
-        (d.docker_result ? '<span class="badge" style="background:rgba(14,165,233,.1);color:#38bdf8;border:1px solid rgba(14,165,233,.3)"><i class="bi bi-hdd-stack me-1"></i>Docker</span>' : '');
-      document.getElementById('pdfBtn').style.display = d.status === 'DONE' ? 'inline-flex' : 'none';
-      renderCVE(d.dependencies || []);
-      allDeps = d.dependencies || []; renderDeps(allDeps);
-      renderDocker(d.docker_result); renderAI(d.recommendations || []);
-      document.getElementById('bdgCve').textContent = tc; document.getElementById('bdgCve').style.display = tc > 0 ? 'inline' : 'none';
-      document.getElementById('bdgDeps').textContent = d.dependencies?.length || 0; document.getElementById('bdgDeps').style.display = 'inline';
-      document.getElementById('bdgAi').textContent = d.recommendations?.length || 0; document.getElementById('bdgAi').style.display = (d.recommendations?.length > 0) ? 'inline' : 'none';
-    }
-
-    function renderCVE(deps) {
-      const vs = []; deps.forEach(d => (d.vulnerabilities || []).forEach(v => vs.push({ ...v, dn: d.name, dv: d.version })));
-      vs.sort((a, b) => (b.cvss_score || 0) - (a.cvss_score || 0));
-      const cnt = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 }; vs.forEach(v => { if (cnt[v.severity] !== undefined) cnt[v.severity]++; });
-      const col = { CRITICAL: '#ef4444', HIGH: '#f97316', MEDIUM: '#f59e0b', LOW: '#9ca3af' };
-      document.getElementById('cveSev').innerHTML = Object.entries(cnt).filter(([, c]) => c > 0).map(([s, c]) => '<span class="badge" style="background:rgba(0,0,0,.3);border:1px solid ' + col[s] + ';color:' + col[s] + '">' + c + ' ' + s + '</span>').join('');
-      if (!vs.length) { document.getElementById('cveBody').innerHTML = '<tr><td colspan="5" class="text-center text-success py-3"><i class="bi bi-check-circle me-2"></i>Aucune CVE detectee</td></tr>'; return; }
-      const sc = { CRITICAL: 'cv-crit', HIGH: 'cv-high', MEDIUM: 'cv-med', LOW: 'cv-low' };
-      document.getElementById('cveBody').innerHTML = vs.map(v => '<tr><td><code style="font-size:.76rem;color:#a78bfa">' + v.cve_id + '</code></td><td><span style="color:#60a5fa">' + v.dn + '</span> <small class="text-muted">' + (v.dv || '') + '</small></td><td><span class="' + (sc[v.severity] || 'cv-low') + '"><i class="bi bi-exclamation-triangle-fill me-1"></i>' + v.severity + '</span></td><td><strong>' + (v.cvss_score?.toFixed(1) || '-') + '</strong></td><td>' + (v.fixed_version ? '<span class="text-success small"><i class="bi bi-arrow-up-circle me-1"></i>' + v.fixed_version + '</span>' : '<span class="text-muted">-</span>') + '</td></tr>').join('');
-    }
-
-    function renderDeps(deps) {
-      if (!deps?.length) { document.getElementById('depsBody').innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">Aucune dependance</td></tr>'; return; }
-      const em = { PyPI: '🐍', npm: '📦', Maven: '☕', Go: '🐹', RubyGems: '💎', Docker: '🐳' };
-      document.getElementById('depsBody').innerHTML = deps.map(d => { const vc = d.vulnerabilities?.length || 0; return '<tr><td><span class="fw-medium">' + d.name + '</span>' + (d.is_outdated ? ' <span class="badge bg-warning bg-opacity-10 text-warning border border-warning border-opacity-25" style="font-size:.63rem">outdated</span>' : '') + '</td><td><code class="text-muted" style="font-size:.78rem">' + (d.version || 'N/A') + '</code></td><td>' + (em[d.ecosystem] || '📦') + ' ' + d.ecosystem + '</td><td><span class="badge bg-' + (vc > 0 ? 'danger' : 'success') + ' bg-opacity-10 text-' + (vc > 0 ? 'danger' : 'success') + ' border border-' + (vc > 0 ? 'danger' : 'success') + ' border-opacity-25">' + vc + ' CVE</span></td><td>' + (d.is_dev ? '<span class="text-muted small">Dev</span>' : '<span class="text-info small">Prod</span>') + '</td></tr>'; }).join('');
-    }
-
-    function filterDeps() {
-      const q = document.getElementById('depsFilter').value.toLowerCase();
-      renderDeps(allDeps.filter(d => d.name.toLowerCase().includes(q) || (d.ecosystem || '').toLowerCase().includes(q) || (d.version || '').toLowerCase().includes(q)));
-    }
-
-    function renderDocker(dr) {
-      const box = document.getElementById('dockerBox');
-      if (!dr) { box.innerHTML = '<div class="text-center text-muted py-4"><i class="bi bi-hdd-stack" style="font-size:2.5rem;opacity:.3"></i><div class="mt-2 small">Aucun Dockerfile detecte</div></div>'; return; }
-      const sc = dr.image_score >= 70 ? '#10b981' : dr.image_score >= 50 ? '#f59e0b' : '#ef4444';
-      box.innerHTML = '<div class="docker-c"><div class="row g-3"><div class="col-md-6"><div class="small text-muted mb-1">Image de base</div><div class="fw-semibold" style="color:#38bdf8">' + (dr.base_image || 'N/A') + '</div></div><div class="col-md-3"><div class="small text-muted mb-1">Vulnerabilites</div><div class="fw-bold text-danger">' + (dr.vulnerabilities_count || 0) + '</div></div><div class="col-md-3"><div class="small text-muted mb-1">Score</div><div class="fw-bold" style="color:' + sc + '">' + (dr.image_score?.toFixed(1) || '-') + '/100</div></div></div><hr style="border-color:#1f2937"/><div class="small"><i class="bi bi-' + (dr.has_root_user ? 'x-circle-fill text-danger' : 'check-circle-fill text-success') + ' me-1"></i>' + (dr.has_root_user ? 'Utilise root (risque !)' : 'Non-root (bonne pratique) &#x2705;') + '</div></div>';
-    }
-
-    function renderAI(recs) {
-      const box = document.getElementById('aiBox');
-      if (!recs?.length) { box.innerHTML = '<div class="text-center text-muted py-4 small">Aucune recommandation disponible</div>'; return; }
-      const pcls = { gemini: 'tag-g', openrouter: 'tag-o', static: 'tag-s' };
-      const plbl = { gemini: '&#x1F916; Gemini AI', openrouter: '&#x26A1; OpenRouter', static: '&#x1F4CB; Statique' };
-      box.innerHTML = recs.map(r => '<div class="rec-card"><div class="d-flex justify-content-between align-items-start mb-2"><span class="fw-semibold small" style="color:#e5e7eb">' + (r.target_type || 'General') + '</span><span class="' + (pcls[r.provider] || 'tag-s') + '">' + (plbl[r.provider] || r.provider) + '</span></div><p class="mb-0 small text-muted" style="line-height:1.6">' + r.recommendation_text + '</p></div>').join('');
-    }
-
-    async function loadHistory() {
-      const box = document.getElementById('histBox');
-      try {
-        const r = await fetch(API + '/analyses?limit=10'); if (!r.ok) throw new Error();
-        const list = await r.json();
-        if (!list.length) { box.innerHTML = '<div class="text-center text-muted py-3 small"><i class="bi bi-inbox" style="font-size:1.8rem;opacity:.3"></i><div class="mt-2">Aucune analyse</div></div>'; return; }
-        box.innerHTML = list.map(a => {
-          const s = a.security_score != null ? Math.round(a.security_score) : null;
-          const sc = s == null ? '#6b7280' : s >= 70 ? '#10b981' : s >= 50 ? '#f59e0b' : '#ef4444';
-          return '<div class="hist-item" onclick="loadDetail(' + a.id + ')"><div class="d-flex justify-content-between align-items-center"><div><div class="fw-semibold small" style="color:#e5e7eb">' + a.repo_name + '</div><div class="text-muted" style="font-size:.7rem">' + new Date(a.created_at).toLocaleString('fr-FR') + '</div></div><div class="d-flex align-items-center gap-2">' + (s != null ? '<span class="fw-bold" style="color:' + sc + ';font-size:.88rem">' + s + '</span>' : '') + mkBadge(a.status) + '</div></div></div>';
-        }).join('');
-      } catch { box.innerHTML = '<div class="text-center text-danger py-3 small">Erreur de chargement</div>'; }
-    }
-
-    async function downloadPDF() {
-      const btn = document.getElementById('pdfBtn');
-      btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Generation...'; btn.disabled = true;
-      try {
-        const r = await fetch(API + '/analyses/' + curId + '/report'); if (!r.ok) throw new Error('Rapport non disponible');
-        const blob = await r.blob(), url = URL.createObjectURL(blob), a = document.createElement('a');
-        a.href = url; a.download = 'rapport_securite_' + curId + '.pdf'; a.click(); URL.revokeObjectURL(url);
-        toast('success', 'PDF telecharge !', 'Rapport genere avec succes');
-      } catch (e) { toast('error', 'Erreur PDF', e.message); }
-      finally { btn.innerHTML = '<i class="bi bi-file-pdf me-1"></i>Telecharger PDF'; btn.disabled = false; }
-    }
-
-    function setUrl(u) { document.getElementById('repoUrl').value = u; document.getElementById('repoUrl').focus(); }
-
-    function showTab(name, btn) {
-      ['Cve', 'Deps', 'Docker', 'Ai'].forEach(t => { document.getElementById('tab' + t).style.display = 'none'; });
-      document.getElementById('tab' + name.charAt(0).toUpperCase() + name.slice(1)).style.display = 'block';
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-    }
-
-    function mkBadge(st) {
-      const m = { PENDING: { c: 'sb-pending', i: 'clock', l: 'PENDING' }, RUNNING: { c: 'sb-running', i: 'arrow-repeat', l: 'RUNNING' }, DONE: { c: 'sb-done', i: 'check-circle', l: 'DONE' }, FAILED: { c: 'sb-failed', i: 'x-circle', l: 'FAILED' } };
-      const x = m[st] || { c: 'sb-pending', i: 'question', l: st };
-      return '<span class="sb ' + x.c + '"><i class="bi bi-' + x.i + '-fill me-1"></i>' + x.l + '</span>';
-    }
-
-    function setBadge(id, st) { document.getElementById(id).innerHTML = mkBadge(st); }
-
-    function toast(type, title, body) {
-      const col = { success: '#10b981', error: '#ef4444', warning: '#f59e0b', info: '#60a5fa' };
-      const ico = { success: 'check-circle-fill', error: 'x-circle-fill', warning: 'exclamation-triangle-fill', info: 'info-circle-fill' };
-      const id = 't' + Date.now();
-      document.getElementById('tw').insertAdjacentHTML('beforeend',
-        '<div id="' + id + '" class="ti"><div style="border-left:4px solid ' + col[type] + ';padding:.75rem 1rem"><div class="d-flex justify-content-between align-items-center mb-1"><strong style="color:#e5e7eb;font-size:.87rem"><i class="bi bi-' + ico[type] + ' me-2" style="color:' + col[type] + '"></i>' + title + '</strong><button style="background:none;border:none;color:#6b7280;cursor:pointer;font-size:1.1rem;line-height:1" onclick="document.getElementById(\'' + id + '\').remove()">&times;</button></div><div style="color:#9ca3af;font-size:.81rem">' + body + '</div></div></div>');
-      setTimeout(() => { const el = document.getElementById(id); if (el) el.remove(); }, 6000);
-    }
-
-    function setImg(name) {
-      document.getElementById('imgInput').value = name;
-      document.getElementById('imgInput').focus();
-    }
-
-    async function scanImage() {
-      const name = document.getElementById('imgInput').value.trim();
-      if (!name) { toast('warning', 'Image requise', 'Entrez un nom d\'image Docker'); return; }
-      const btn = document.getElementById('imgScanBtn');
-      btn.disabled = true;
-      btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Scan Trivy en cours...';
-      document.getElementById('imgResult').style.display = 'none';
-      try {
-        const r = await fetch(API + '/scan-image', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image_name: name })
-        });
-        if (!r.ok) {
-          const e = await r.json();
-          throw new Error(e.detail || 'Erreur ' + r.status);
-        }
-        const d = await r.json();
-        // Afficher le résultat
-        const sc = d.image_score;
-        document.getElementById('imgScoreVal').textContent = Math.round(sc);
-        document.getElementById('imgNameLbl').textContent = d.image_name;
-        document.getElementById('imgVulnLbl').textContent = d.vulnerabilities_count + ' vulnerabilite(s) detectee(s)';
-        // Couleur du score
-        const circle = document.getElementById('imgScoreCircle');
-        let col = '#ef4444';
-        if (sc >= 70) col = '#10b981';
-        else if (sc >= 50) col = '#f59e0b';
-        else if (sc >= 30) col = '#f97316';
-        circle.style.borderColor = col;
-        circle.style.color = col;
-        circle.style.background = col.replace(')', ',.08)').replace('rgb', 'rgba');
-        // Badges sévérité
-        const cols = { CRITICAL: '#ef4444', HIGH: '#f97316', MEDIUM: '#f59e0b', LOW: '#9ca3af', UNKNOWN: '#6b7280' };
-        const sev = d.vulnerabilities_by_severity || {};
-        document.getElementById('imgSevBadges').innerHTML = Object.entries(sev)
-          .filter(([, c]) => c > 0)
-          .map(([s, c]) => '<span class="badge me-1" style="background:rgba(0,0,0,.3);border:1px solid ' + cols[s] + ';color:' + cols[s] + '">' + c + ' ' + s + '</span>')
-          .join('');
-        document.getElementById('imgResult').style.display = 'block';
-        toast('success', 'Scan termine !', d.image_name + ' — Score: ' + Math.round(sc) + '/100');
-      } catch (e) {
-        toast('error', 'Erreur scan image', e.message);
-      } finally {
-        btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-hdd-stack me-2"></i>Scanner l\'Image';
+      /* ── TABS (scan form) ── */
+      function switchTab(t) {
+        curTab = t;
+        document.querySelectorAll('.tab-nav:first-of-type .tab-btn').forEach((b, i) => b.classList.toggle('active', (i === 0 && t === 'repo') || (i === 1 && t === 'docker')));
+        document.getElementById('tab-repo').classList.toggle('active', t === 'repo');
+        document.getElementById('tab-docker').classList.toggle('active', t === 'docker');
       }
-    }
 
-    checkHealth();
+      /* ── SCAN TYPE (Standard / Deep) ── */
+      function selectScanType(t) {
+        curScanType = t;
+        document.getElementById('btn-standard').classList.toggle('selected', t === 'standard');
+        document.getElementById('btn-deep').classList.toggle('selected', t === 'deep');
+      }
 
-  </script>
-</body>
+      /* ── HISTORY TABS ── */
+      function switchHist(type) {
+        curHistType = type;
+        document.getElementById('histTabRepo').classList.toggle('active', type === 'github');
+        document.getElementById('histTabDocker').classList.toggle('active', type === 'docker');
+        loadHistory();
+      }
 
-</html>
+      /* ── TOAST ── */
+      function toast(title, msg, type = 'info') {
+        const el = document.createElement('div');
+        el.className = `toast toast-${type}`;
+        el.innerHTML = `<div>
+      <div class="toast-title">${title}</div>
+      ${msg ? `<div class="toast-msg">${msg}</div>` : ''}
+    </div>
+    <button onclick="this.parentElement.remove()" style="background:none;border:none;margin-left:auto;color:var(--muted);font-size:1.1rem;cursor:pointer;">&times;</button>`;
+        document.getElementById('toasts').appendChild(el);
+        setTimeout(() => el.remove(), 6000);
+      }
+
+      /* ── HEALTH ── */
+      async function checkHealth() {
+        try {
+          const r = await fetch(`${API}/health`);
+          if (!r.ok) throw new Error();
+          document.getElementById('apiBadge').innerHTML = `<span class="status-dot"></span> API en ligne`;
+          document.getElementById('apiBadge').style.color = 'var(--success)';
+          loadHistory();
+        } catch {
+          document.getElementById('apiBadge').innerHTML = `<span style="width:8px;height:8px;border-radius:50%;background:var(--danger);display:inline-block"></span> API hors ligne`;
+          document.getElementById('apiBadge').style.color = 'var(--danger)';
+        }
+      }
+
+      /* ── LOAD HISTORY ── */
+      async function loadHistory() {
+        const box = document.getElementById('histList');
+        box.innerHTML = `<div class="empty-state"><span class="spinner-sm"></span></div>`;
+        try {
+          const r = await fetch(`${API}/analyses?limit=20&target_type=${curHistType}`);
+          const data = await r.json();
+          if (!Array.isArray(data) || !data.length) {
+            box.innerHTML = `<div class="empty-state"><i class="bi bi-inbox"></i>Aucun historique pour ce type</div>`;
+            return;
+          }
+          box.innerHTML = data.map(a => {
+            const sc = a.security_score !== null && a.security_score !== undefined ? Math.round(a.security_score) : null;
+            const scColor = sc === null ? 'var(--muted)' : sc >= 80 ? 'var(--success)' : sc >= 50 ? 'var(--warning)' : 'var(--danger)';
+            const scanBadge = a.scan_type === 'deep'
+              ? `<span class="badge badge-deep" style="margin-left:auto">${a.scan_type}</span>`
+              : `<span class="badge badge-standard" style="margin-left:auto">${a.scan_type || 'standard'}</span>`;
+            return `
+          <div class="hist-item" onclick="loadDetail(${a.id})">
+            <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.25rem">
+              <span class="hist-name">${a.repo_name}</span>
+              ${statusBadge(a.status)}
+              ${scanBadge}
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between">
+              <span class="hist-meta">${new Date(a.created_at).toLocaleString('fr-FR')}</span>
+              ${sc !== null ? `<span style="font-weight:700;font-size:.85rem;color:${scColor}">${sc}/100</span>` : ''}
+            </div>
+          </div>`;
+          }).join('');
+        } catch (e) {
+          box.innerHTML = `<div class="empty-state" style="color:var(--danger)"><i class="bi bi-exclamation-triangle"></i>Erreur de chargement</div>`;
+        }
+      }
+
+      function reloadHistory() { loadHistory(); }
+
+      /* ── BADGES ── */
+      function statusBadge(s) {
+        const m = { pending: ['badge-pending', 'clock'], running: ['badge-running', 'arrow-repeat'], done: ['badge-done', 'check-circle'], failed: ['badge-failed', 'x-circle'] };
+        const [cls, icon] = m[s?.toLowerCase()] || ['badge-pending', 'question'];
+        return `<span class="badge ${cls}"><i class="bi bi-${icon}"></i>${(s || '').toUpperCase()}</span>`;
+      }
+      function sevBadge(s) {
+        const m = { CRITICAL: 'badge-failed', HIGH: 'badge', MEDIUM: 'badge-pending', LOW: 'badge-pending' };
+        const colors = { CRITICAL: '#dc2626', HIGH: '#d97706', MEDIUM: '#6b7280', LOW: '#94a3b8' };
+        const up = (s || '').toUpperCase();
+        return `<span class="badge" style="background:${colors[up] || '#e2e8f0'};color:#fff">${up}</span>`;
+      }
+
+      /* ── LAUNCH REPO ── */
+      async function launchRepo() {
+        const raw = document.getElementById('repoUrl').value.trim();
+        if (!raw) return toast('Champ vide', 'Entrez l\'URL GitHub', 'danger');
+
+        // Nettoyage côté client
+        let url = raw.replace(/\.git$/, '').replace(/\/$/, '');
+        if (!url.startsWith('https://github.com/')) {
+          return toast('URL invalide', 'L\'URL doit commencer par https://github.com/', 'danger');
+        }
+
+        const btn = document.getElementById('btnRepo');
+        btn.disabled = true;
+        btn.innerHTML = `<span class="spinner-sm"></span> Envoi en cours…`;
+        try {
+          const r = await fetch(`${API}/analyze`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ repo_url: url, scan_type: curScanType })
+          });
+          const data = await r.json();
+          if (!r.ok) throw new Error(data.detail || 'Erreur API');
+          toast('✅ Analyse lancée', `${data.repo_name} — Scan ${curScanType.toUpperCase()}`, 'success');
+          curHistType = 'github';
+          document.getElementById('histTabRepo').classList.add('active');
+          document.getElementById('histTabDocker').classList.remove('active');
+          loadHistory();
+          startTracker(data.id, data.repo_name);
+        } catch (e) {
+          toast('Erreur', e.message, 'danger');
+        } finally {
+          btn.disabled = false;
+          btn.innerHTML = `<i class="bi bi-search"></i> Analyser le Repo`;
+        }
+      }
+
+      /* ── LAUNCH DOCKER ── */
+      async function launchDocker() {
+        const raw = document.getElementById('imgName').value.trim();
+        if (!raw) return toast('Champ vide', 'Entrez un nom d\'image Docker', 'danger');
+
+        // Nettoyer les préfixes éventuels
+        const imageName = raw
+          .replace(/^docker\s+pull\s+/i, '')
+          .replace(/^https?:\/\/hub\.docker\.com\/r\//i, '')
+          .replace(/\/$/, '')
+          .trim();
+
+        if (!imageName) return toast('Image invalide', 'Nom d\'image non reconnu', 'danger');
+
+        const btn = document.getElementById('btnDocker');
+        btn.disabled = true;
+        btn.innerHTML = `<span class="spinner-sm"></span> Lancement du scan Trivy…`;
+        try {
+          const r = await fetch(`${API}/analyze/docker`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image_name: imageName })
+          });
+          const data = await r.json();
+          if (!r.ok) throw new Error(data.detail || 'Erreur API');
+          toast('✅ Scan Docker lancé', `Image : ${imageName}`, 'success');
+          curHistType = 'docker';
+          document.getElementById('histTabRepo').classList.remove('active');
+          document.getElementById('histTabDocker').classList.add('active');
+          loadHistory();
+          startTracker(data.id, imageName);
+        } catch (e) {
+          toast('Erreur', e.message, 'danger');
+        } finally {
+          btn.disabled = false;
+          btn.innerHTML = `<i class="bi bi-search"></i> Scanner l'image`;
+        }
+      }
+
+      /* ── TRACKER ── */
+      function startTracker(id, name) {
+        if (trackTimer) clearInterval(trackTimer);
+        const tracker = document.getElementById('tracker');
+        tracker.style.display = 'block';
+        document.getElementById('trackerName').textContent = name;
+        document.getElementById('trackerStatus').textContent = 'PENDING — en attente de démarrage…';
+
+        trackTimer = setInterval(async () => {
+          try {
+            const r = await fetch(`${API}/analyses/${id}`);
+            const data = await r.json();
+            document.getElementById('trackerStatus').textContent = `${data.status.toUpperCase()} — ${data.repo_name}`;
+            if (data.status === 'done' || data.status === 'failed') {
+              clearInterval(trackTimer);
+              tracker.style.display = 'none';
+              if (data.status === 'done') toast('✅ Terminé', `Analyse de ${name} complète`, 'success');
+              else toast('❌ Échoué', `L'analyse de ${name} a échoué`, 'danger');
+              loadHistory();
+              loadDetail(id);
+            }
+          } catch { clearInterval(trackTimer); }
+        }, 3000);
+      }
+
+      /* ── DETAIL VIEW ── */
+      async function loadDetail(id) {
+        document.getElementById('welcomeMsg').style.display = 'none';
+        document.getElementById('resultPanel').style.display = 'block';
+        curAnalysisId = id;
+
+        // Reset
+        document.getElementById('scoreVal').textContent = '…';
+        document.getElementById('resName').textContent = '…';
+        document.getElementById('riskLbl').textContent = '';
+        document.getElementById('resStatus').innerHTML = '';
+        document.getElementById('resScanType').innerHTML = '';
+        document.getElementById('resTypeTag').innerHTML = '';
+        document.getElementById('resDate').textContent = '';
+        document.getElementById('recsList').innerHTML = `<div class="empty-state"><span class="spinner-sm"></span> Chargement…</div>`;
+
+        try {
+          const r = await fetch(`${API}/analyses/${id}`);
+          const d = await r.json();
+
+          // Header
+          document.getElementById('resName').textContent = d.repo_name;
+          document.getElementById('resDate').textContent = new Date(d.created_at).toLocaleString('fr-FR');
+          document.getElementById('resStatus').innerHTML = statusBadge(d.status);
+          document.getElementById('resScanType').innerHTML = d.scan_type === 'deep'
+            ? `<span class="badge badge-deep"><i class="bi bi-microscope me-1"></i>DEEP SCAN</span>`
+            : `<span class="badge badge-standard"><i class="bi bi-lightning-charge me-1"></i>STANDARD SCAN</span>`;
+          document.getElementById('resTypeTag').innerHTML = d.target_type === 'docker'
+            ? `<span class="badge" style="background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0"><i class="bi bi-box-seam me-1"></i>Docker</span>`
+            : `<span class="badge" style="background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe"><i class="bi bi-github me-1"></i>GitHub</span>`;
+
+          // Score
+          const sc = d.status === 'done' && d.security_score !== null ? Math.round(d.security_score) : null;
+          const ring = document.getElementById('scoreRing');
+          if (sc !== null) {
+            document.getElementById('scoreVal').textContent = sc;
+            const col = sc >= 80 ? 'var(--success)' : sc >= 50 ? 'var(--warning)' : 'var(--danger)';
+            ring.style.borderColor = col; ring.style.color = col;
+            const labels = { L: [80, '🟢 RISQUE FAIBLE'], M: [50, '🟡 RISQUE MODÉRÉ'], H: [30, '🟠 RISQUE ÉLEVÉ'], C: [-1, '🔴 CRITIQUE'] };
+            let lbl = '🔴 CRITIQUE';
+            if (sc >= 80) lbl = '🟢 RISQUE FAIBLE';
+            else if (sc >= 50) lbl = '🟡 RISQUE MODÉRÉ';
+            else if (sc >= 30) lbl = '🟠 RISQUE ÉLEVÉ';
+            document.getElementById('riskLbl').textContent = lbl;
+            document.getElementById('riskLbl').style.color = col;
+          } else {
+            document.getElementById('scoreVal').textContent = '—';
+            ring.style.borderColor = 'var(--border)'; ring.style.color = 'var(--muted)';
+            document.getElementById('riskLbl').textContent = d.status === 'failed' ? '❌ ÉCHOUÉ' : '⏳ EN COURS';
+          }
+
+          // Matrix
+          buildMatrix(d.dependencies, d.docker_result);
+
+          // RECS
+          const recs = d.recommendations || [];
+          document.getElementById('cntRecs').textContent = recs.length;
+          document.getElementById('recsList').innerHTML = recs.length
+            ? recs.map(r => `
+            <div class="rec-card">
+              <div class="rec-type rec-type-${r.target_type}">
+                <i class="bi bi-${r.target_type === 'docker' ? 'box-seam' : r.target_type === 'dependency' ? 'package' : 'globe'} me-1"></i>
+                ${r.target_type.toUpperCase()}
+                ${r.provider ? `<span style="opacity:.6;font-weight:400;margin-left:.25rem">— ${r.provider}</span>` : ''}
+              </div>
+              <div class="rec-text">${r.recommendation_text}</div>
+            </div>`).join('')
+            : `<div class="empty-state"><i class="bi bi-check-circle" style="color:var(--success)"></i>${d.status === 'done' ? 'Aucune recommandation générée.' : 'Analyse non terminée.'}</div>`;
+
+          // VULNS
+          let allVulns = [];
+          (d.dependencies || []).forEach(dep => (dep.vulnerabilities || []).forEach(v => allVulns.push({ ...v, pkg: dep.name })));
+          document.getElementById('cntVulns').textContent = allVulns.length;
+          document.getElementById('vulnsTbody').innerHTML = allVulns.length
+            ? allVulns.map(v => `<tr>
+            <td><code>${v.cve_id}</code></td>
+            <td style="font-weight:600">${v.pkg}</td>
+            <td>${sevBadge(v.severity)}</td>
+            <td style="font-weight:700">${(v.cvss_score || 0).toFixed(1)}</td>
+            <td>${v.fixed_version ? `<span style="color:var(--success)"><i class="bi bi-check-circle"></i> ${v.fixed_version}</span>` : '<span style="color:var(--muted)">—</span>'}</td>
+            <td>${v.exploit_available ? '<span class="badge badge-failed"><i class="bi bi-exclamation-triangle"></i> Oui</span>' : '<span class="badge badge-done">Non</span>'}</td>
+          </tr>`).join('')
+            : `<tr><td colspan="6" class="empty-state"><i class="bi bi-shield-check" style="color:var(--success)"></i>Aucune CVE détectée</td></tr>`;
+
+          // DEPS
+          const deps = d.dependencies || [];
+          document.getElementById('cntDeps').textContent = deps.length;
+          document.getElementById('depsTabBtn').style.display = d.target_type === 'docker' ? 'none' : '';
+          document.getElementById('depsTbody').innerHTML = deps.length
+            ? deps.map(dep => `<tr>
+            <td style="font-weight:600">${dep.name}</td>
+            <td><code>${dep.version}</code></td>
+            <td><span class="badge badge-pending">${dep.ecosystem}</span></td>
+            <td>${(dep.vulnerabilities || []).length
+                ? `<span class="badge badge-failed"><i class="bi bi-bug"></i> ${dep.vulnerabilities.length} CVE</span>`
+                : `<span class="badge badge-done"><i class="bi bi-check-circle"></i> Safe</span>`}</td>
+            <td>${dep.is_outdated ? '<span class="badge badge-failed">Oui</span>' : '<span class="badge badge-done">Non</span>'}</td>
+          </tr>`).join('')
+            : `<tr><td colspan="5" class="empty-state">Aucune dépendance détectée</td></tr>`;
+
+          // DOCKER RESULT
+          const dr = d.docker_result;
+          document.getElementById('dockerTabBtn').style.display = dr ? '' : 'none';
+          if (dr) {
+            document.getElementById('dockerResContent').innerHTML = `
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1rem;padding:.5rem 0">
+            <div class="card" style="margin:0;padding:1rem;text-align:center">
+              <div style="font-size:.75rem;color:var(--muted);font-weight:700;text-transform:uppercase;margin-bottom:.5rem">Image</div>
+              <div style="font-weight:700;font-size:.95rem">${dr.base_image}</div>
+            </div>
+            <div class="card" style="margin:0;padding:1rem;text-align:center">
+              <div style="font-size:.75rem;color:var(--muted);font-weight:700;text-transform:uppercase;margin-bottom:.5rem">Score Image</div>
+              <div style="font-weight:800;font-size:1.5rem;color:${dr.image_score >= 70 ? 'var(--success)' : dr.image_score >= 40 ? 'var(--warning)' : 'var(--danger)'}">${Math.round(dr.image_score)}/100</div>
+            </div>
+            <div class="card" style="margin:0;padding:1rem;text-align:center">
+              <div style="font-size:.75rem;color:var(--muted);font-weight:700;text-transform:uppercase;margin-bottom:.5rem">Vulnérabilités Trivy</div>
+              <div style="font-weight:800;font-size:1.5rem;color:${dr.vulnerabilities_count > 100 ? 'var(--danger)' : dr.vulnerabilities_count > 10 ? 'var(--warning)' : 'var(--success)'}">${dr.vulnerabilities_count}</div>
+            </div>
+            <div class="card" style="margin:0;padding:1rem;text-align:center">
+              <div style="font-size:.75rem;color:var(--muted);font-weight:700;text-transform:uppercase;margin-bottom:.5rem">Utilisateur Root</div>
+              <div style="font-weight:700;color:${dr.has_root_user ? 'var(--danger)' : 'var(--success)'}">${dr.has_root_user ? '⚠️ Oui (risque élevé)' : '✅ Non'}</div>
+            </div>
+          </div>`;
+          }
+
+        } catch (e) {
+          toast('Erreur', 'Impossible de charger les détails : ' + e.message, 'danger');
+        }
+      }
+
+      /* ── MATRIX ── */
+      function buildMatrix(deps, dockerResult) {
+        let crit = 0, high = 0, med = 0;
+        (deps || []).forEach(d => (d.vulnerabilities || []).forEach(v => {
+          const s = (v.severity || '').toUpperCase();
+          if (s === 'CRITICAL') crit++;
+          else if (s === 'HIGH') high++;
+          else if (s === 'MEDIUM') med++;
+        }));
+        if (dockerResult?.vulnerabilities_count > 0) crit += Math.floor(dockerResult.vulnerabilities_count * 0.05);
+
+        // Reset
+        ['m33', 'm32', 'm31', 'm23', 'm22', 'm21', 'm13', 'm12', 'm11'].forEach(id => {
+          const el = document.getElementById(id);
+          el.textContent = '0';
+          el.className = 'mc mc-empty';
+        });
+
+        if (crit > 5) { setMC('m31', crit, 'C'); }
+        else if (crit > 0) { setMC('m32', crit, 'H'); }
+        if (high > 10) { setMC('m21', high, 'H'); }
+        else if (high > 0) { setMC('m22', high, 'M'); }
+        if (med > 0) { setMC('m13', med, 'L'); }
+      }
+
+      function setMC(id, val, level) {
+        const el = document.getElementById(id);
+        el.textContent = val;
+        el.className = `mc mc-${level}`;
+      }
+
+      /* ── DETAIL TABS ── */
+      function showDetailTab(name) {
+        document.querySelectorAll('.detail-tab').forEach((b, i) => {
+          const tabs = ['recs', 'vulns', 'deps', 'dockerRes'];
+          b.classList.toggle('active', tabs[i] === name);
+        });
+        document.querySelectorAll('.detail-pane').forEach(p => p.classList.toggle('active', p.id === `pane-${name}`));
+      }
+
+      // Init
+      checkHealth();
+    </script>
+  </body>
+
+  </html>

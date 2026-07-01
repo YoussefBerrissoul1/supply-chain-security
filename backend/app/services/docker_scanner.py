@@ -254,6 +254,8 @@ def is_trivy_available() -> bool:
             [settings.TRIVY_PATH, "--version"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=10,
         )
         if result.returncode == 0:
@@ -316,6 +318,8 @@ def run_trivy_scan(image_name: str) -> dict | None:
             trivy_command,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=TRIVY_TIMEOUT_SECONDS + 10,  # Léger dépassement toléré
         )
 

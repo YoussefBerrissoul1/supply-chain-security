@@ -300,49 +300,129 @@ def _mark_analysis_failed(db: Session, analysis_id: int, error_message: str) -> 
 
 
 # ============================================================
-# POST /analyze — Lancer une analyse
+# FONCTION D'ANALYSE DOCKER EN ARRIERE-PLAN
+# ============================================================
+
+def run_docker_analysis(analysis_id: int, image_name: str) -> None:
+    """Execute le scan Docker (Trivy) complet en arriere-plan."""
+    db = SessionLocal()
+
+    try:
+        analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
+        if not analysis:
+            return
+
+        analysis.status = AnalysisStatus.RUNNING
+        db.commit()
+        logger.info("=== Demarrage analyse Docker #%d pour %s ===", analysis_id, image_name)
+
+        if not is_trivy_available():
+            raise Exception("Trivy n'est pas installe.")
+
+        trivy_data = run_trivy_scan(image_name)
+        if trivy_data is None:
+            raise Exception(f"Impossible de scanner l'image '{image_name}'.")
+
+        vulns_by_severity = parse_trivy_report(trivy_data)
+        total_vulns = sum(vulns_by_severity.values())
+
+        # Enregistrer DockerResult
+        image_score = calculate_image_score(vulns_by_severity, True, image_name)
+        
+        db_docker = DockerResult(
+            analysis_id=analysis_id,
+            base_image=image_name,
+            vulnerabilities_count=total_vulns,
+            has_root_user=True,
+            image_score=image_score,
+        )
+        db.add(db_docker)
+        db.commit()
+
+        # Score final
+        from app.services.score_service import ScoreResult, RiskLevel
+        score_result = ScoreResult(
+            final_score=image_score,
+            risk_level=RiskLevel.CRITIQUE if image_score < 50 else RiskLevel.BON,
+            total_penalties=max(0.0, 100.0 - image_score),
+            total_cve=total_vulns,
+            has_docker=True,
+            penalties=[],
+        )
+        analysis.security_score = image_score
+        db.commit()
+
+        # Generer recs IA (Trivy CVEs non sauvegardées en tant que Vulnerability, donc dict vide)
+        cve_results: dict = {}
+        try:
+            generate_recommendations(
+                db=db, analysis_id=analysis_id, score_result=score_result,
+                cve_results=cve_results, repo_name=image_name, ecosystems=["docker"], total_deps=1
+            )
+        except Exception as ai_err:
+            logger.warning("Recommandations IA non generees pour Docker #%d : %s", analysis_id, ai_err)
+
+        analysis.status = AnalysisStatus.DONE
+        db.commit()
+        logger.info("=== Analyse Docker #%d terminee (score=%.1f) ===", analysis_id, image_score)
+
+    except Exception as e:
+        logger.error("Analyse Docker #%d echouee : %s", analysis_id, e)
+        _mark_analysis_failed(db, analysis_id, str(e))
+    finally:
+        db.close()
+
+
+# ============================================================
+# POST /analyze — Lancer une analyse GitHub
 # ============================================================
 
 @router.post(
     "/analyze",
     response_model=AnalysisListResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Lancer une analyse de securite",
-    description="Soumet une URL GitHub pour analyse. Retourne immediatement "
-                "avec status=PENDING. L'analyse complete tourne en arriere-plan.",
+    summary="Lancer une analyse de securite (GitHub)",
+    description="Soumet une URL GitHub pour analyse (scan Standard ou Deep). "
+                "Retourne immediatement avec status=PENDING. L'analyse tourne en arriere-plan.",
 )
 def create_analysis(
     request: AnalysisRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ) -> Analysis:
-    """
-    Cree une nouvelle analyse en base (statut PENDING) et lance
-    la chaine de scan complete en arriere-plan.
+    # --- Nettoyage et validation de l'URL ---
+    repo_url_str = str(request.repo_url).strip().rstrip("/")
+    # Supprimer le .git si present (certains outils le rajoutent)
+    if repo_url_str.endswith(".git"):
+        repo_url_str = repo_url_str[:-4]
 
-    Le client recoit une reponse immediate avec l'objet analyse.
-    Il peut ensuite interroger GET /analyses/{id} pour suivre
-    l'avancement (PENDING -> RUNNING -> DONE ou FAILED).
-    """
-    repo_url_str = str(request.repo_url).rstrip("/")
-    repo_name = repo_url_str.split("/")[-1]
+    # Validation rapide avant de creer en DB
+    try:
+        validated_url = validate_github_url(repo_url_str)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"URL GitHub invalide : {exc}",
+        )
 
-    logger.info("Nouvelle analyse demandee pour : %s", repo_name)
+    repo_name = validated_url.rstrip("/").split("/")[-1]
+    scan_type = request.scan_type if request.scan_type in ("standard", "deep") else "standard"
 
-    # Creer l'analyse en base
+    logger.info("Nouvelle analyse %s demandee pour : %s", scan_type.upper(), repo_name)
+
     analysis = Analysis(
-        repo_url=repo_url_str,
+        repo_url=validated_url,
         repo_name=repo_name,
+        target_type="github",
         status=AnalysisStatus.PENDING,
-        scan_type=request.scan_type,
+        scan_type=scan_type,
     )
     db.add(analysis)
     db.commit()
     db.refresh(analysis)
 
-    # Lancer l'analyse en arriere-plan
-    background_tasks.add_task(run_full_analysis, analysis.id, repo_url_str)
-    logger.info("Analyse #%d creee — scan lance en arriere-plan", analysis.id)
+    background_tasks.add_task(run_full_analysis, analysis.id, validated_url)
+    logger.info("Analyse #%d creee (%s) — scan lance en arriere-plan", analysis.id, scan_type)
 
     return analysis
 
@@ -355,20 +435,22 @@ def create_analysis(
     "/analyses",
     response_model=list[AnalysisListResponse],
     summary="Historique des analyses",
-    description="Retourne les 10 dernieres analyses, triees par date decroissante.",
+    description="Retourne les dernières analyses, optionnellement filtrées par type.",
 )
 def list_analyses(
     db: Session = Depends(get_db),
-    limit: int = 10,
+    limit: int = 20,
+    target_type: str | None = None,
 ) -> list[Analysis]:
-    """Retourne les N dernieres analyses (par defaut 10)."""
-    analyses = (
-        db.query(Analysis)
-        .order_by(Analysis.created_at.desc())
-        .limit(limit)
-        .all()
-    )
-    logger.info("Historique demande : %d analyses retournees", len(analyses))
+    """Retourne les N dernieres analyses (par defaut 20)."""
+    query = db.query(Analysis)
+    
+    if target_type:
+        query = query.filter(Analysis.target_type == target_type)
+        
+    analyses = query.order_by(Analysis.created_at.desc()).limit(limit).all()
+    
+    logger.info("Historique demande (type=%s) : %d analyses retournees", target_type, len(analyses))
     return analyses
 
 
@@ -496,39 +578,25 @@ def health_check(
 
 
 # ============================================================
-# POST /scan-image — Scanner une image Docker Hub directement
+# POST /analyze/docker — Scanner une image Docker Hub
 # ============================================================
 
 from pydantic import BaseModel as PydanticBaseModel
 
 class ImageScanRequest(PydanticBaseModel):
-    """Corps de la requete POST /scan-image."""
     image_name: str
 
-
 @router.post(
-    "/scan-image",
-    summary="Scanner une image Docker Hub directement",
-    description=(
-        "Accepte un nom d'image Docker Hub (ex: vulnerables/web-dvwa, python:3.12-slim) "
-        "et retourne immediatement le rapport Trivy avec le score de securite. "
-        "Ne necessite pas de depot GitHub."
-    ),
+    "/analyze/docker",
+    response_model=AnalysisListResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Scanner une image Docker Hub",
 )
-def scan_docker_image(request: ImageScanRequest):
-    """
-    Scanner une image Docker directement depuis Docker Hub via Trivy.
-
-    Exemples d'images :
-        - vulnerables/web-dvwa         (intentionnellement vulnerable)
-        - python:3.12-slim             (image de base Python)
-        - node:18-alpine               (image Node minimale)
-        - ubuntu:22.04                 (systeme de base)
-
-    Retourne :
-        Un dict avec image_name, score, vulnerabilities_count,
-        vulnerabilities_by_severity, trivy_available.
-    """
+def create_docker_analysis(
+    request: ImageScanRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> Analysis:
     image_name = request.image_name.strip()
 
     if not image_name:
@@ -537,54 +605,20 @@ def scan_docker_image(request: ImageScanRequest):
             detail="Le nom de l'image est requis.",
         )
 
-    logger.info("Scan direct image Docker : %s", image_name)
+    logger.info("Nouvelle analyse Docker demandee : %s", image_name)
 
-    # Verifier que Trivy est disponible
-    if not is_trivy_available():
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=(
-                "Trivy n'est pas installe sur ce serveur. "
-                "Installez Trivy depuis https://trivy.dev/latest/getting-started/installation/"
-            ),
-        )
-
-    # Lancer le scan Trivy
-    trivy_data = run_trivy_scan(image_name)
-
-    if trivy_data is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=(
-                f"Impossible de scanner l'image '{image_name}'. "
-                "Verifiez que le nom est correct et que l'image existe sur Docker Hub."
-            ),
-        )
-
-    # Parser les resultats
-    vulns_by_severity = parse_trivy_report(trivy_data)
-    total_vulns = sum(vulns_by_severity.values())
-
-    # Calculer le score (on suppose root=True si image inconnue)
-    image_score = calculate_image_score(
-        vulns_by_severity=vulns_by_severity,
-        has_root_user=True,
-        base_image=image_name,
+    analysis = Analysis(
+        repo_url=image_name,
+        repo_name=image_name,
+        target_type="docker",
+        status=AnalysisStatus.PENDING,
+        scan_type="docker",
     )
+    db.add(analysis)
+    db.commit()
+    db.refresh(analysis)
 
-    logger.info(
-        "Scan image '%s' termine : %d vulns, score=%.1f",
-        image_name, total_vulns, image_score,
-    )
+    background_tasks.add_task(run_docker_analysis, analysis.id, image_name)
+    logger.info("Analyse Docker #%d creee", analysis.id)
 
-    return {
-        "image_name":              image_name,
-        "image_score":             image_score,
-        "vulnerabilities_count":   total_vulns,
-        "vulnerabilities_by_severity": vulns_by_severity,
-        "trivy_available":         True,
-        "detail": (
-            f"Scan Trivy termine : {total_vulns} vulnerabilite(s) detectee(s) "
-            f"dans '{image_name}'."
-        ),
-    }
+    return analysis
