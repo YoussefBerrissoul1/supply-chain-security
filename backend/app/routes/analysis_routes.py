@@ -45,6 +45,7 @@ from app.services.docker_scanner import (
     scan_docker,
     run_trivy_scan,
     parse_trivy_report,
+    extract_trivy_vulnerabilities,
     calculate_image_score,
     is_trivy_available,
 )
@@ -141,7 +142,7 @@ def run_full_analysis(analysis_id: int, repo_url: str) -> None:
         # ----------------------------------------------------------
         cve_results: dict[str, list[VulnerabilityResult]] = {}
         if dependencies:
-            cve_results = scan_all_vulnerabilities(dependencies)
+            cve_results = scan_all_vulnerabilities(dependencies, scan_type=analysis.scan_type)
             total_cves = sum(len(v) for v in cve_results.values())
             logger.info("[4/8] %d CVE detectees", total_cves)
 
@@ -337,6 +338,46 @@ def run_docker_analysis(analysis_id: int, image_name: str) -> None:
             image_score=image_score,
         )
         db.add(db_docker)
+
+        # Enregistrer un mock Dependency pour Docker, suivi de ses vulnérabilités
+        docker_dep = Dependency(
+            analysis_id=analysis_id,
+            name=image_name,
+            version="latest",
+            ecosystem="docker",
+            is_outdated=False,
+            is_dev=False,
+        )
+        db.add(docker_dep)
+        db.commit()
+
+        # Extraire et enregistrer les Vulnerability depuis Trivy
+        extracted_vulns = extract_trivy_vulnerabilities(trivy_data)
+
+        sev_mapping = {
+            "CRITICAL": SeverityLevel.CRITICAL,
+            "HIGH": SeverityLevel.HIGH,
+            "MEDIUM": SeverityLevel.MEDIUM,
+            "LOW": SeverityLevel.LOW,
+            "NONE": SeverityLevel.LOW
+        }
+
+        for vuln in extracted_vulns:
+            sev_value = vuln.severity.value if hasattr(vuln.severity, 'value') else str(vuln.severity)
+            db_sev = sev_mapping.get(sev_value, SeverityLevel.LOW)
+
+            db_vuln = Vulnerability(
+                dependency_id=docker_dep.id,
+                cve_id=vuln.cve_id,
+                cvss_score=vuln.cvss_score,
+                severity=db_sev,
+                description=vuln.description or "",
+                fixed_version=vuln.fixed_version,
+                exploit_available=vuln.exploit_available,
+                published_date=vuln.published_date,
+            )
+            db.add(db_vuln)
+
         db.commit()
 
         # Score final
@@ -352,8 +393,8 @@ def run_docker_analysis(analysis_id: int, image_name: str) -> None:
         analysis.security_score = image_score
         db.commit()
 
-        # Generer recs IA (Trivy CVEs non sauvegardées en tant que Vulnerability, donc dict vide)
-        cve_results: dict = {}
+        # Generer recs IA
+        cve_results: dict = {f"{image_name}@latest": extracted_vulns}
         try:
             generate_recommendations(
                 db=db, analysis_id=analysis_id, score_result=score_result,
