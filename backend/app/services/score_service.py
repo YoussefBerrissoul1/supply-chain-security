@@ -221,6 +221,9 @@ def _compute_cve_penalties(
     # Déduplication des vulnérabilités pour éviter de compter plusieurs fois le même CVE ID
     unique_cves: dict[str, tuple[VulnerabilityResult, str]] = {}
     for dep_key, vulns in cve_results.items():
+        # Ignorer la clé méta interne (injectée par scan_all_vulnerabilities)
+        if dep_key == "__scan_meta__":
+            continue
         for vuln in vulns:
             if vuln.cve_id not in unique_cves:
                 unique_cves[vuln.cve_id] = (vuln, dep_key)

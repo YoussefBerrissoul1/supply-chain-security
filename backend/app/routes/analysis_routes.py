@@ -14,7 +14,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from fastapi.responses import FileResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
 from app.core.database import get_db, SessionLocal
@@ -40,12 +40,11 @@ from app.services.github_analyzer import (
     GitHubAnalyzerError,
 )
 from app.services.dependency_scanner import scan_dependencies, DependencyInfo
-from app.services.cve_service import scan_all_vulnerabilities, VulnerabilityResult
+from app.services.cve_service import scan_all_vulnerabilities, VulnerabilityResult, Severity, CVE_SERVICE_VERSION
 from app.services.docker_scanner import (
     scan_docker,
     run_trivy_scan,
     parse_trivy_report,
-    extract_trivy_vulnerabilities,
     calculate_image_score,
     is_trivy_available,
 )
@@ -62,7 +61,7 @@ router = APIRouter()
 # FONCTION D'ANALYSE COMPLETE EN ARRIERE-PLAN (Etape 16)
 # ============================================================
 
-def run_full_analysis(analysis_id: int, repo_url: str) -> None:
+def run_full_analysis(analysis_id: int, repo_url: str, scan_type: str = "standard") -> None:
     """
     Execute la chaine d'analyse complete en arriere-plan.
 
@@ -142,9 +141,35 @@ def run_full_analysis(analysis_id: int, repo_url: str) -> None:
         # ----------------------------------------------------------
         cve_results: dict[str, list[VulnerabilityResult]] = {}
         if dependencies:
-            cve_results = scan_all_vulnerabilities(dependencies, scan_type=analysis.scan_type)
-            total_cves = sum(len(v) for v in cve_results.values())
-            logger.info("[4/8] %d CVE detectees", total_cves)
+            try:
+                # Passer le scan_type au service CVE (standard ou deep)
+                # standard : OSV + NVD si cvss=0, 8 workers parallèles
+                # deep     : OSV + NVD systématique, 3 workers (rate limit NVD)
+                cve_results = scan_all_vulnerabilities(dependencies, scan_type=scan_type)
+
+                # Extraire et sauvegarder les métadonnées de troncature (Point 4)
+                scan_meta = cve_results.pop("__scan_meta__", {})
+                if scan_meta:
+                    analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
+                    if analysis:
+                        analysis.dependencies_truncated = scan_meta.get("deps_truncated", False)
+                        analysis.dependencies_scanned_count = scan_meta.get("deps_scanned")
+                        analysis.dependencies_total_count = scan_meta.get("deps_total")
+                        # Point 2 : enregistrer la version du moteur CVE
+                        analysis.cve_service_version = CVE_SERVICE_VERSION
+                        db.commit()
+
+                total_cves = sum(len(v) for v in cve_results.values())
+                logger.info("[4/8] %d CVE detectees (mode %s)", total_cves, scan_type)
+            except Exception as cve_err:
+                # Une erreur réseau (timeout OSV/NVD) ne doit pas faire échouer toute l'analyse.
+                # On continue avec cve_results vide : les dépendances seront en base
+                # mais sans vulns. Le score sera plus optimiste mais l'analyse ne crash pas.
+                logger.error(
+                    "[4/8] Erreur lors du scan CVE (OSV/NVD) : %s. "
+                    "L'analyse continue sans données CVE.",
+                    cve_err,
+                )
 
         # Sauvegarder les vulnerabilites en base
         # Il faut relier chaque vuln a la dependance correspondante
@@ -152,6 +177,9 @@ def run_full_analysis(analysis_id: int, repo_url: str) -> None:
         dep_map = {f"{d.name}@{d.version}": d for d in db_deps}
 
         for dep_key, vulns in cve_results.items():
+            # Ignorer la clé méta interne injectée par scan_all_vulnerabilities
+            if dep_key == "__scan_meta__":
+                continue
             db_dep = dep_map.get(dep_key)
             if not db_dep:
                 # Essayer de trouver par nom seul
@@ -202,7 +230,7 @@ def run_full_analysis(analysis_id: int, repo_url: str) -> None:
                 db_docker = DockerResult(
                     analysis_id=analysis_id,
                     base_image=docker_result.base_image,
-                    vulnerabilities_count=docker_result.total_vulnerabilities,
+                    vulnerabilities_count=docker_result.vulnerabilities_count,
                     has_root_user=docker_result.has_root_user,
                     image_score=docker_result.image_score,
                 )
@@ -241,22 +269,37 @@ def run_full_analysis(analysis_id: int, repo_url: str) -> None:
         # ----------------------------------------------------------
         # ETAPE 8 : Generation du rapport PDF
         # ----------------------------------------------------------
-        # Recharger l'analyse avec toutes ses relations pour le PDF
-        db.refresh(analysis)
-        try:
-            pdf_path = generate_pdf_report(analysis)
-
-            # Sauvegarder la reference du rapport en base
-            db_report = Report(
-                analysis_id=analysis_id,
-                format=ReportFormat.PDF,
-                file_path=pdf_path,
+        # Charger explicitement toutes les relations (joinedload) avant de passer
+        # l'objet Analysis à ReportLab. Sans ça, SQLAlchemy ferait du lazy loading
+        # sur une session potentiellement fermée => erreur.
+        analysis_for_pdf = (
+            db.query(Analysis)
+            .options(
+                joinedload(Analysis.dependencies).joinedload(Dependency.vulnerabilities),
+                joinedload(Analysis.docker_result),
+                joinedload(Analysis.recommendations),
+                joinedload(Analysis.reports),
             )
-            db.add(db_report)
-            db.commit()
-            logger.info("[8/8] Rapport PDF genere : %s", pdf_path)
-        except Exception as e:
-            logger.warning("Generation PDF echouee (non bloquant) : %s", e)
+            .filter(Analysis.id == analysis_id)
+            .first()
+        )
+        if analysis_for_pdf:
+            try:
+                pdf_path = generate_pdf_report(analysis_for_pdf)
+
+                # Sauvegarder la reference du rapport en base
+                db_report = Report(
+                    analysis_id=analysis_id,
+                    format=ReportFormat.PDF,
+                    file_path=pdf_path,
+                )
+                db.add(db_report)
+                db.commit()
+                logger.info("[8/8] Rapport PDF genere : %s", pdf_path)
+            except Exception as e:
+                logger.warning("Generation PDF echouee (non bloquant) : %s", e)
+        else:
+            logger.warning("[8/8] Analyse #%d introuvable pour generation PDF", analysis_id)
 
         # ----------------------------------------------------------
         # SUCCES : Mettre a jour le statut -> DONE
@@ -318,13 +361,17 @@ def run_docker_analysis(analysis_id: int, image_name: str) -> None:
         logger.info("=== Demarrage analyse Docker #%d pour %s ===", analysis_id, image_name)
 
         if not is_trivy_available():
-            raise Exception("Trivy n'est pas installe.")
+            raise Exception("Trivy n'est pas installe ou introuvable dans le PATH.")
 
-        trivy_data = run_trivy_scan(image_name)
+        # Correction B : fallback scan_type si la colonne est None (anciennes entrees en base)
+        scan_type = analysis.scan_type or "standard"
+        logger.info("Type de scan : %s", scan_type)
+
+        trivy_data = run_trivy_scan(image_name, scan_type=scan_type)
         if trivy_data is None:
             raise Exception(f"Impossible de scanner l'image '{image_name}'.")
 
-        vulns_by_severity = parse_trivy_report(trivy_data)
+        vulns_by_severity, detailed_vulns = parse_trivy_report(trivy_data)
         total_vulns = sum(vulns_by_severity.values())
 
         # Enregistrer DockerResult
@@ -338,67 +385,94 @@ def run_docker_analysis(analysis_id: int, image_name: str) -> None:
             image_score=image_score,
         )
         db.add(db_docker)
-
-        # Enregistrer un mock Dependency pour Docker, suivi de ses vulnérabilités
-        docker_dep = Dependency(
-            analysis_id=analysis_id,
-            name=image_name,
-            version="latest",
-            ecosystem="docker",
-            is_outdated=False,
-            is_dev=False,
-        )
-        db.add(docker_dep)
-        db.commit()
-
-        # Extraire et enregistrer les Vulnerability depuis Trivy
-        extracted_vulns = extract_trivy_vulnerabilities(trivy_data)
-
-        sev_mapping = {
-            "CRITICAL": SeverityLevel.CRITICAL,
-            "HIGH": SeverityLevel.HIGH,
-            "MEDIUM": SeverityLevel.MEDIUM,
-            "LOW": SeverityLevel.LOW,
-            "NONE": SeverityLevel.LOW
-        }
-
-        for vuln in extracted_vulns:
-            sev_value = vuln.severity.value if hasattr(vuln.severity, 'value') else str(vuln.severity)
-            db_sev = sev_mapping.get(sev_value, SeverityLevel.LOW)
-
-            db_vuln = Vulnerability(
-                dependency_id=docker_dep.id,
-                cve_id=vuln.cve_id,
-                cvss_score=vuln.cvss_score,
-                severity=db_sev,
-                description=vuln.description or "",
-                fixed_version=vuln.fixed_version,
-                exploit_available=vuln.exploit_available,
-                published_date=vuln.published_date,
+        
+        # Enregistrer les dépendances et vulnérabilités détaillées
+        deps_dict = {}
+        for vuln in detailed_vulns:
+            if vuln.pkg_name not in deps_dict:
+                deps_dict[vuln.pkg_name] = {
+                    "installed_version": vuln.installed_version,
+                    "vulns": []
+                }
+            deps_dict[vuln.pkg_name]["vulns"].append(vuln)
+            
+        cve_results = {}
+        for pkg_name, data in deps_dict.items():
+            dep = Dependency(
+                analysis_id=analysis_id,
+                name=pkg_name,
+                version=data["installed_version"],
+                ecosystem="docker"
             )
-            db.add(db_vuln)
+            db.add(dep)
+            db.flush()
+            
+            dep_key = f"{pkg_name}@{data['installed_version']}"
+            cve_results[dep_key] = []
+            for v in data["vulns"]:
+                # Convertir la sévérité au format attendu (UNKNOWN -> LOW par défaut)
+                try:
+                    sev = SeverityLevel(v.severity)
+                except ValueError:
+                    sev = SeverityLevel.LOW
+                    
+                vuln_record = Vulnerability(
+                    dependency_id=dep.id,
+                    cve_id=v.cve_id,
+                    cvss_score=v.cvss_score,
+                    severity=sev,
+                    description=v.description,
+                    fixed_version=v.fixed_version,
+                    published_date=v.published_date
+                )
+                db.add(vuln_record)
+                
+                # Construire un vrai VulnerabilityResult pour l'IA
+                # (generate_recommendations attend dict[str, list[VulnerabilityResult]])
+                severity_mapping = {
+                    "CRITICAL": Severity.CRITICAL,
+                    "HIGH": Severity.HIGH,
+                    "MEDIUM": Severity.MEDIUM,
+                    "LOW": Severity.LOW,
+                }
+                ai_severity = severity_mapping.get(sev.value, Severity.LOW)
+                cve_results[dep_key].append(VulnerabilityResult(
+                    cve_id=v.cve_id,
+                    severity=ai_severity,
+                    cvss_score=v.cvss_score,
+                    description=v.description or "",
+                    source="trivy",
+                    fixed_version=v.fixed_version,
+                    exploit_available=False,
+                    published_date=v.published_date,
+                ))
 
         db.commit()
 
-        # Score final
-        from app.services.score_service import ScoreResult, RiskLevel
-        score_result = ScoreResult(
-            final_score=image_score,
-            risk_level=RiskLevel.CRITIQUE if image_score < 50 else RiskLevel.BON,
-            total_penalties=max(0.0, 100.0 - image_score),
-            total_cve=total_vulns,
-            has_docker=True,
-            penalties=[],
+        # Calcul du score Docker proprement avec compute_security_score
+        from app.services.docker_scanner import DockerScanResult
+        docker_scan_obj = DockerScanResult(
+            base_image=image_name,
+            vulnerabilities_count=total_vulns,
+            vulnerabilities_by_severity=vulns_by_severity,
+            has_root_user=True,
+            image_score=image_score,
+            dockerfile_issues=[],
         )
-        analysis.security_score = image_score
+        score_result = compute_security_score(
+            cve_results={},
+            docker_result=docker_scan_obj,
+            dependencies=[],
+        )
+        final_score = score_result.final_score
+        analysis.security_score = final_score
         db.commit()
 
-        # Generer recs IA
-        cve_results: dict = {f"{image_name}@latest": extracted_vulns}
+        # Generer recs IA 
         try:
             generate_recommendations(
                 db=db, analysis_id=analysis_id, score_result=score_result,
-                cve_results=cve_results, repo_name=image_name, ecosystems=["docker"], total_deps=1
+                cve_results=cve_results, repo_name=image_name, ecosystems=["docker"], total_deps=len(deps_dict)
             )
         except Exception as ai_err:
             logger.warning("Recommandations IA non generees pour Docker #%d : %s", analysis_id, ai_err)
@@ -433,11 +507,9 @@ def create_analysis(
 ) -> Analysis:
     # --- Nettoyage et validation de l'URL ---
     repo_url_str = str(request.repo_url).strip().rstrip("/")
-    # Supprimer le .git si present (certains outils le rajoutent)
     if repo_url_str.endswith(".git"):
         repo_url_str = repo_url_str[:-4]
 
-    # Validation rapide avant de creer en DB
     try:
         validated_url = validate_github_url(repo_url_str)
     except Exception as exc:
@@ -448,6 +520,21 @@ def create_analysis(
 
     repo_name = validated_url.rstrip("/").split("/")[-1]
     scan_type = request.scan_type if request.scan_type in ("standard", "deep") else "standard"
+
+    # --- Correction A : protection contre les doubles scans ---
+    # Si une analyse PENDING ou RUNNING existe déjà pour ce repo, on la retourne
+    # plutôt que d'en créer une nouvelle (qui provoquerait un conflit de cache Trivy).
+    existing = db.query(Analysis).filter(
+        Analysis.repo_url == validated_url,
+        Analysis.target_type == "github",
+        Analysis.status.in_([AnalysisStatus.PENDING, AnalysisStatus.RUNNING]),
+    ).first()
+    if existing:
+        logger.info(
+            "Analyse #%d déjà en cours pour '%s' (%s) — retour de l'existante",
+            existing.id, repo_name, existing.status.value,
+        )
+        return existing
 
     logger.info("Nouvelle analyse %s demandee pour : %s", scan_type.upper(), repo_name)
 
@@ -462,7 +549,7 @@ def create_analysis(
     db.commit()
     db.refresh(analysis)
 
-    background_tasks.add_task(run_full_analysis, analysis.id, validated_url)
+    background_tasks.add_task(run_full_analysis, analysis.id, validated_url, scan_type)
     logger.info("Analyse #%d creee (%s) — scan lance en arriere-plan", analysis.id, scan_type)
 
     return analysis
@@ -521,6 +608,58 @@ def get_analysis(
 
     logger.info("Detail de l'analyse #%d retourne", analysis_id)
     return analysis
+
+
+# ============================================================
+# GET /analyses/{id}/progress — Progression en temps reel
+# ============================================================
+
+@router.get(
+    "/analyses/{analysis_id}/progress",
+    summary="Progression d'une analyse en cours",
+    description="Retourne la progression detaillee : deps trouvees, CVE detectees, statut.",
+)
+def get_analysis_progress(
+    analysis_id: int,
+    db: Session = Depends(get_db),
+) -> dict:
+    """
+    Endpoint de progression pour l'affichage progressif dans l'interface.
+    Retourne des statistiques partielles meme si l'analyse est encore RUNNING.
+    """
+    analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
+    if not analysis:
+        raise HTTPException(status_code=404, detail=f"Analyse #{analysis_id} non trouvee")
+
+    # Compter ce qui est deja en base (meme en cours d'analyse)
+    total_deps = db.query(Dependency).filter(Dependency.analysis_id == analysis_id).count()
+
+    total_vulns = 0
+    vuln_by_sev = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+    dep_ids = [d.id for d in db.query(Dependency.id).filter(Dependency.analysis_id == analysis_id).all()]
+    if dep_ids:
+        vulns = db.query(Vulnerability).filter(Vulnerability.dependency_id.in_(dep_ids)).all()
+        total_vulns = len(vulns)
+        for v in vulns:
+            key = v.severity.value if hasattr(v.severity, 'value') else str(v.severity)
+            if key in vuln_by_sev:
+                vuln_by_sev[key] += 1
+
+    total_recs = db.query(Recommendation).filter(Recommendation.analysis_id == analysis_id).count()
+    has_docker = db.query(DockerResult).filter(DockerResult.analysis_id == analysis_id).first() is not None
+
+    return {
+        "id": analysis_id,
+        "status": analysis.status.value,
+        "scan_type": analysis.scan_type,
+        "target_type": analysis.target_type,
+        "security_score": analysis.security_score,
+        "total_deps": total_deps,
+        "total_vulns": total_vulns,
+        "vulns_by_severity": vuln_by_sev,
+        "total_recommendations": total_recs,
+        "has_docker": has_docker,
+    }
 
 
 # ============================================================
@@ -626,6 +765,7 @@ from pydantic import BaseModel as PydanticBaseModel
 
 class ImageScanRequest(PydanticBaseModel):
     image_name: str
+    scan_type: str = "standard"
 
 @router.post(
     "/analyze/docker",
@@ -646,20 +786,38 @@ def create_docker_analysis(
             detail="Le nom de l'image est requis.",
         )
 
+    # --- Protection double scan Docker ---
+    # Si la même image est déjà en cours de scan (PENDING ou RUNNING),
+    # on retourne l'analyse existante plutôt qu'en créer une nouvelle.
+    existing = db.query(Analysis).filter(
+        Analysis.repo_url == image_name,
+        Analysis.target_type == "docker",
+        Analysis.status.in_([AnalysisStatus.PENDING, AnalysisStatus.RUNNING]),
+    ).first()
+    if existing:
+        logger.info(
+            "Image Docker '%s' déjà en cours de scan (#%d, %s) — retour de l'existante",
+            image_name, existing.id, existing.status.value,
+        )
+        return existing
+
     logger.info("Nouvelle analyse Docker demandee : %s", image_name)
+
+    # Valider le scan_type reçu du frontend ("standard" ou "deep")
+    scan_type = request.scan_type if request.scan_type in ("standard", "deep") else "standard"
 
     analysis = Analysis(
         repo_url=image_name,
         repo_name=image_name,
         target_type="docker",
         status=AnalysisStatus.PENDING,
-        scan_type="docker",
+        scan_type=scan_type,
     )
     db.add(analysis)
     db.commit()
     db.refresh(analysis)
 
     background_tasks.add_task(run_docker_analysis, analysis.id, image_name)
-    logger.info("Analyse Docker #%d creee", analysis.id)
+    logger.info("Analyse Docker #%d creee (scan_type=%s)", analysis.id, scan_type)
 
     return analysis

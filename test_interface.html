@@ -1,1175 +1,1045 @@
-  <!DOCTYPE html>
-  <html lang="fr">
-
-  <head>
-    <meta charset="UTF-8">
-    <title>Supply Chain Security </title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <style>
-      :root {
-        --primary: #2563eb;
-        --primary-dark: #1d4ed8;
-        --success: #10b981;
-        --warning: #f59e0b;
-        --danger: #ef4444;
-        --orange: #f97316;
-        --bg: #f1f5f9;
-        --surface: #ffffff;
-        --surface2: #f8fafc;
-        --text: #0f172a;
-        --muted: #64748b;
-        --border: #e2e8f0;
-        --radius: 12px;
-        --shadow: 0 1px 4px rgba(0, 0, 0, .08);
-      }
-
-      * {
-        box-sizing: border-box;
-      }
-
-      body {
-        font-family: 'Inter', sans-serif;
-        background: var(--bg);
-        color: var(--text);
-        min-height: 100vh;
-      }
-
-      /* NAV */
-      .topbar {
-        background: var(--surface);
-        border-bottom: 1px solid var(--border);
-        padding: .75rem 1.5rem;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-      }
-
-      .topbar-brand {
-        font-weight: 800;
-        font-size: 1.1rem;
-        color: var(--primary);
-        display: flex;
-        align-items: center;
-        gap: .5rem;
-      }
-
-      .status-dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: var(--success);
-        display: inline-block;
-        animation: pulse 2s infinite;
-      }
-
-      @keyframes pulse {
-
-        0%,
-        100% {
-          opacity: 1
-        }
-
-        50% {
-          opacity: .4
-        }
-      }
-
-      /* LAYOUT */
-      .main {
-        display: grid;
-        grid-template-columns: 380px 1fr;
-        gap: 1.25rem;
-        padding: 1.25rem;
-        max-width: 1600px;
-        margin: 0 auto;
-      }
-
-      /* CARD */
-      .card {
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        box-shadow: var(--shadow);
-        margin-bottom: 1.25rem;
-        overflow: hidden;
-      }
-
-      .card-hd {
-        padding: .875rem 1.25rem;
-        border-bottom: 1px solid var(--border);
-        font-weight: 600;
-        font-size: .9rem;
-        display: flex;
-        align-items: center;
-        gap: .5rem;
-      }
-
-      .card-bd {
-        padding: 1.25rem;
-      }
-
-      /* TABS */
-      .tab-nav {
-        display: flex;
-        border-bottom: 1px solid var(--border);
-        background: var(--surface2);
-      }
-
-      .tab-btn {
-        flex: 1;
-        padding: .75rem;
-        text-align: center;
-        border: none;
-        background: none;
-        font-weight: 600;
-        font-size: .85rem;
-        color: var(--muted);
-        cursor: pointer;
-        border-bottom: 2px solid transparent;
-        transition: .2s;
-      }
-
-      .tab-btn:hover {
-        color: var(--text);
-      }
-
-      .tab-btn.active {
-        color: var(--primary);
-        border-bottom-color: var(--primary);
-        background: var(--surface);
-      }
-
-      .tab-pane {
-        display: none;
-        padding: 1.25rem;
-      }
-
-      .tab-pane.active {
-        display: block;
-      }
-
-      /* SCAN TYPE SELECTOR (Standard/Deep) */
-      .scan-type-group {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: .5rem;
-        margin-bottom: 1rem;
-      }
-
-      .scan-type-btn {
-        border: 2px solid var(--border);
-        border-radius: 8px;
-        padding: .6rem .75rem;
-        cursor: pointer;
-        background: var(--surface2);
-        transition: .2s;
-        text-align: left;
-      }
-
-      .scan-type-btn:hover {
-        border-color: var(--primary);
-        background: #eff6ff;
-      }
-
-      .scan-type-btn.selected {
-        border-color: var(--primary);
-        background: #eff6ff;
-      }
-
-      .scan-type-btn .label {
-        font-weight: 700;
-        font-size: .85rem;
-        color: var(--text);
-      }
-
-      .scan-type-btn .desc {
-        font-size: .73rem;
-        color: var(--muted);
-        margin-top: 2px;
-      }
-
-      .scan-type-btn i {
-        color: var(--primary);
-      }
-
-      /* FORM */
-      .form-label-sm {
-        font-size: .75rem;
-        font-weight: 700;
-        color: var(--muted);
-        text-transform: uppercase;
-        letter-spacing: .04em;
-        margin-bottom: .35rem;
-        display: block;
-      }
-
-      .form-control {
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: .55rem .85rem;
-        font-size: .9rem;
-        width: 100%;
-        transition: .2s;
-      }
-
-      .form-control:focus {
-        outline: none;
-        border-color: var(--primary);
-        box-shadow: 0 0 0 3px rgba(37, 99, 235, .12);
-      }
-
-      .btn-primary-full {
-        width: 100%;
-        background: var(--primary);
-        color: #fff;
-        border: none;
-        border-radius: 8px;
-        padding: .65rem 1rem;
-        font-weight: 700;
-        font-size: .9rem;
-        cursor: pointer;
-        transition: .2s;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: .4rem;
-      }
-
-      .btn-primary-full:hover {
-        background: var(--primary-dark);
-      }
-
-      .btn-primary-full:disabled {
-        opacity: .6;
-        cursor: not-allowed;
-      }
-
-      /* BADGE */
-      .badge {
-        display: inline-flex;
-        align-items: center;
-        gap: .25rem;
-        padding: .3rem .6rem;
-        border-radius: 20px;
-        font-size: .73rem;
-        font-weight: 700;
-      }
-
-      .badge-pending {
-        background: #f1f5f9;
-        color: #475569;
-      }
-
-      .badge-running {
-        background: #dbeafe;
-        color: #1e40af;
-      }
-
-      .badge-done {
-        background: #d1fae5;
-        color: #065f46;
-      }
-
-      .badge-failed {
-        background: #fee2e2;
-        color: #991b1b;
-      }
-
-      .badge-standard {
-        background: #f0fdf4;
-        color: #15803d;
-        border: 1px solid #bbf7d0;
-      }
-
-      .badge-deep {
-        background: #faf5ff;
-        color: #7c3aed;
-        border: 1px solid #ddd6fe;
-      }
-
-      /* HISTORY */
-      .hist-item {
-        padding: .75rem 1.25rem;
-        border-bottom: 1px solid var(--border);
-        cursor: pointer;
-        transition: .15s;
-      }
-
-      .hist-item:hover {
-        background: var(--surface2);
-      }
-
-      .hist-item:last-child {
-        border-bottom: none;
-      }
-
-      .hist-name {
-        font-weight: 600;
-        font-size: .9rem;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        max-width: 180px;
-      }
-
-      .hist-meta {
-        font-size: .73rem;
-        color: var(--muted);
-      }
-
-      /* ACTIVE TRACKER */
-      .tracker {
-        border: 2px solid var(--warning);
-        border-radius: var(--radius);
-        background: #fffbeb;
-        padding: 1rem;
-        margin-bottom: 1.25rem;
-        display: none;
-      }
-
-      /* SCORE CIRCLE */
-      .score-ring {
-        width: 110px;
-        height: 110px;
-        border-radius: 50%;
-        border: 5px solid var(--border);
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        font-size: 2rem;
-        font-weight: 800;
-        margin: 0 auto;
-        transition: .3s;
-      }
-
-      /* RISK MATRIX */
-      .matrix-wrap {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 4px;
-      }
-
-      .matrix-grid {
-        display: grid;
-        grid-template-columns: repeat(3, 40px);
-        grid-template-rows: repeat(3, 40px);
-        gap: 2px;
-      }
-
-      .mc {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: .8rem;
-        font-weight: 700;
-        color: #fff;
-        border-radius: 4px;
-      }
-
-      .mc-empty {
-        background: #e2e8f0;
-        color: #94a3b8;
-      }
-
-      .mc-L {
-        background: var(--success);
-      }
-
-      .mc-M {
-        background: var(--warning);
-        color: var(--text);
-      }
-
-      .mc-H {
-        background: var(--orange);
-      }
-
-      .mc-C {
-        background: var(--danger);
-      }
-
-      .axis-lbl {
-        font-size: .65rem;
-        font-weight: 700;
-        color: var(--muted);
-        text-transform: uppercase;
-        letter-spacing: .04em;
-      }
-
-      /* RESULTS TABLE */
-      .res-table {
-        width: 100%;
-        font-size: .85rem;
-        border-collapse: collapse;
-      }
-
-      .res-table th {
-        background: var(--surface2);
-        color: var(--muted);
-        font-weight: 700;
-        font-size: .75rem;
-        text-transform: uppercase;
-        padding: .5rem .75rem;
-        border-bottom: 1px solid var(--border);
-      }
-
-      .res-table td {
-        padding: .6rem .75rem;
-        border-bottom: 1px solid var(--border);
-        vertical-align: middle;
-      }
-
-      .res-table tbody tr:hover {
-        background: #f8fafc;
-      }
-
-      .res-table tbody tr:last-child td {
-        border-bottom: none;
-      }
-
-      /* REC CARD */
-      .rec-card {
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: 1rem;
-        margin-bottom: .75rem;
-      }
-
-      .rec-type {
-        display: inline-flex;
-        align-items: center;
-        gap: .3rem;
-        font-size: .72rem;
-        font-weight: 700;
-        padding: .25rem .5rem;
-        border-radius: 4px;
-        text-transform: uppercase;
-        margin-bottom: .5rem;
-      }
-
-      .rec-type-dependency {
-        background: #eff6ff;
-        color: #1e40af;
-      }
-
-      .rec-type-docker {
-        background: #f0fdf4;
-        color: #15803d;
-      }
-
-      .rec-type-global {
-        background: #faf5ff;
-        color: #7c3aed;
-      }
-
-      .rec-type-code {
-        background: #fff7ed;
-        color: #c2410c;
-      }
-
-      .rec-text {
-        font-size: .88rem;
-        color: var(--text);
-        line-height: 1.55;
-      }
-
-      /* DETAIL TABS */
-      .detail-tabs {
-        display: flex;
-        border-bottom: 1px solid var(--border);
-        background: var(--surface);
-      }
-
-      .detail-tab {
-        padding: .75rem 1.2rem;
-        border: none;
-        background: none;
-        font-weight: 600;
-        font-size: .85rem;
-        color: var(--muted);
-        cursor: pointer;
-        border-bottom: 2px solid transparent;
-        transition: .2s;
-      }
-
-      .detail-tab.active {
-        color: var(--primary);
-        border-bottom-color: var(--primary);
-      }
-
-      .detail-pane {
-        display: none;
-        padding: 1.25rem;
-        background: var(--surface2);
-      }
-
-      .detail-pane.active {
-        display: block;
-      }
-
-      /* WELCOME */
-      .welcome {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        min-height: 400px;
-        text-align: center;
-        color: var(--muted);
-      }
-
-      .welcome i {
-        font-size: 5rem;
-        opacity: .15;
-        color: var(--primary);
-        margin-bottom: 1rem;
-      }
-
-      /* TOAST */
-      #toasts {
-        position: fixed;
-        bottom: 1rem;
-        right: 1rem;
-        z-index: 9999;
-        display: flex;
-        flex-direction: column;
-        gap: .5rem;
-      }
-
-      .toast {
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: .75rem 1rem;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, .15);
-        display: flex;
-        align-items: flex-start;
-        gap: .5rem;
-        max-width: 320px;
-        animation: slideIn .2s;
-      }
-
-      @keyframes slideIn {
-        from {
-          transform: translateX(20px);
-          opacity: 0
-        }
-
-        to {
-          transform: none;
-          opacity: 1
-        }
-      }
-
-      .toast-success {
-        border-left: 3px solid var(--success);
-      }
-
-      .toast-danger {
-        border-left: 3px solid var(--danger);
-      }
-
-      .toast-info {
-        border-left: 3px solid var(--primary);
-      }
-
-      .toast-title {
-        font-weight: 700;
-        font-size: .85rem;
-      }
-
-      .toast-msg {
-        font-size: .8rem;
-        color: var(--muted);
-      }
-
-      .spinner-sm {
-        width: 1rem;
-        height: 1rem;
-        border: 2px solid currentColor;
-        border-right-color: transparent;
-        border-radius: 50%;
-        animation: spin .6s linear infinite;
-        display: inline-block;
-      }
-
-      @keyframes spin {
-        to {
-          transform: rotate(360deg)
-        }
-      }
-
-      .empty-state {
-        text-align: center;
-        padding: 3rem;
-        color: var(--muted);
-      }
-
-      .empty-state i {
-        font-size: 2.5rem;
-        opacity: .3;
-        display: block;
-        margin-bottom: .75rem;
-      }
-    </style>
-  </head>
-
-  <body>
-
-    <!-- TOP BAR -->
-    <div class="topbar">
-      <div class="topbar-brand">
-        <i class="bi bi-shield-shaded"></i>
-        Supply Chain Security
-      </div>
-      <div style="display:flex;align-items:center;gap:.75rem">
-        <span id="apiBadge"
-          style="display:flex;align-items:center;gap:.4rem;font-size:.8rem;font-weight:600;color:var(--success)">
-          <span class="status-dot"></span> API en ligne
-        </span>
-        <a href="http://localhost:8000/docs" target="_blank" class="btn btn-sm btn-outline-secondary">
-          <i class="bi bi-book me-1"></i>Swagger
-        </a>
-      </div>
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Supply Chain Security — Audit Platform</title>
+  <meta name="description" content="Plateforme d'audit automatisé de la chaîne d'approvisionnement logicielle">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #2563eb;
+      --primary-dark: #1d4ed8;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --orange: #f97316;
+      --bg: #f1f5f9;
+      --surface: #ffffff;
+      --surface2: #f8fafc;
+      --text: #0f172a;
+      --muted: #64748b;
+      --border: #e2e8f0;
+      --radius: 12px;
+      --shadow: 0 1px 4px rgba(0,0,0,.08);
+    }
+    * { box-sizing: border-box; }
+    body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+    /* NAV */
+    .topbar { background: var(--surface); border-bottom: 1px solid var(--border); padding: .75rem 1.5rem; display: flex; align-items: center; justify-content: space-between; }
+    .topbar-brand { font-weight: 800; font-size: 1.1rem; color: var(--primary); display: flex; align-items: center; gap: .5rem; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); display: inline-block; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:.4 } }
+
+    /* LAYOUT */
+    .main { display: grid; grid-template-columns: 380px 1fr; gap: 1.25rem; padding: 1.25rem; max-width: 1600px; margin: 0 auto; }
+
+    /* CARD */
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 1.25rem; overflow: hidden; }
+    .card-hd { padding: .875rem 1.25rem; border-bottom: 1px solid var(--border); font-weight: 600; font-size: .9rem; display: flex; align-items: center; gap: .5rem; }
+    .card-bd { padding: 1.25rem; }
+
+    /* TABS */
+    .tab-nav { display: flex; border-bottom: 1px solid var(--border); background: var(--surface2); }
+    .tab-btn { flex: 1; padding: .75rem; text-align: center; border: none; background: none; font-weight: 600; font-size: .85rem; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; transition: .2s; }
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); background: var(--surface); }
+    .tab-pane { display: none; padding: 1.25rem; }
+    .tab-pane.active { display: block; }
+
+    /* SCAN TYPE */
+    .scan-type-group { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; margin-bottom: 1rem; }
+    .scan-type-btn { border: 2px solid var(--border); border-radius: 8px; padding: .6rem .75rem; cursor: pointer; background: var(--surface2); transition: .2s; text-align: left; }
+    .scan-type-btn:hover { border-color: var(--primary); background: #eff6ff; }
+    .scan-type-btn.selected { border-color: var(--primary); background: #eff6ff; }
+    .scan-type-btn .label { font-weight: 700; font-size: .85rem; color: var(--text); }
+    .scan-type-btn .desc { font-size: .73rem; color: var(--muted); margin-top: 2px; }
+    .scan-type-btn i { color: var(--primary); }
+
+    /* FORM */
+    .form-label-sm { font-size: .75rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: .35rem; display: block; }
+    .form-control { border: 1px solid var(--border); border-radius: 8px; padding: .55rem .85rem; font-size: .9rem; width: 100%; transition: .2s; }
+    .form-control:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37,99,235,.12); }
+    .btn-primary-full { width: 100%; background: var(--primary); color: #fff; border: none; border-radius: 8px; padding: .65rem 1rem; font-weight: 700; font-size: .9rem; cursor: pointer; transition: .2s; display: flex; align-items: center; justify-content: center; gap: .4rem; }
+    .btn-primary-full:hover { background: var(--primary-dark); }
+    .btn-primary-full:disabled { opacity: .6; cursor: not-allowed; }
+
+    /* BADGE */
+    .badge { display: inline-flex; align-items: center; gap: .25rem; padding: .3rem .6rem; border-radius: 20px; font-size: .73rem; font-weight: 700; }
+    .badge-pending { background: #f1f5f9; color: #475569; }
+    .badge-running { background: #dbeafe; color: #1e40af; }
+    .badge-done { background: #d1fae5; color: #065f46; }
+    .badge-failed { background: #fee2e2; color: #991b1b; }
+    .badge-standard { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+    .badge-deep { background: #faf5ff; color: #7c3aed; border: 1px solid #ddd6fe; }
+
+    /* HISTORY */
+    .hist-item { padding: .75rem 1.25rem; border-bottom: 1px solid var(--border); cursor: pointer; transition: .15s; }
+    .hist-item:hover { background: var(--surface2); }
+    .hist-item:last-child { border-bottom: none; }
+    .hist-name { font-weight: 600; font-size: .9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
+    .hist-meta { font-size: .73rem; color: var(--muted); }
+
+    /* TRACKER */
+    .tracker { border: 2px solid var(--warning); border-radius: var(--radius); background: #fffbeb; padding: 1rem; margin-bottom: 1.25rem; display: none; }
+
+    /* SCORE RING */
+    .score-ring { width: 110px; height: 110px; border-radius: 50%; border: 5px solid var(--border); display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 2rem; font-weight: 800; margin: 0 auto; transition: .3s; }
+
+    /* MATRIX */
+    .matrix-wrap { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+    .matrix-grid { display: grid; grid-template-columns: repeat(4, 32px); grid-template-rows: repeat(4, 32px); gap: 2px; }
+    .mc { display: flex; align-items: center; justify-content: center; font-size: .8rem; font-weight: 700; color: #fff; border-radius: 4px; }
+    .mc-empty { background: #e2e8f0; color: #94a3b8; }
+    .mc-L { background: var(--success); }
+    .mc-M { background: var(--warning); color: var(--text); }
+    .mc-H { background: var(--orange); }
+    .mc-C { background: var(--danger); }
+    .axis-lbl { font-size: .65rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+
+    /* STEP BADGES */
+    .step-badge { font-size: .7rem; padding: .2rem .45rem; border-radius: 4px; background: #f1f5f9; color: var(--muted); font-weight: 600; transition: .3s; }
+    .step-badge.active { background: #dbeafe; color: #1e40af; }
+    .step-badge.done { background: #d1fae5; color: #065f46; }
+
+    /* TABLE */
+    .res-table { width: 100%; font-size: .85rem; border-collapse: collapse; }
+    .res-table th { background: var(--surface2); color: var(--muted); font-weight: 700; font-size: .75rem; text-transform: uppercase; padding: .5rem .75rem; border-bottom: 1px solid var(--border); }
+    .res-table td { padding: .6rem .75rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    .res-table tbody tr:hover { background: #f8fafc; }
+    .res-table tbody tr:last-child td { border-bottom: none; }
+
+    /* REC CARD */
+    .rec-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; margin-bottom: .75rem; }
+    .rec-type { display: inline-flex; align-items: center; gap: .3rem; font-size: .72rem; font-weight: 700; padding: .25rem .5rem; border-radius: 4px; text-transform: uppercase; margin-bottom: .5rem; }
+    .rec-type-dependency { background: #eff6ff; color: #1e40af; }
+    .rec-type-docker { background: #f0fdf4; color: #15803d; }
+    .rec-type-global { background: #faf5ff; color: #7c3aed; }
+    .rec-text { font-size: .88rem; color: var(--text); line-height: 1.65; white-space: pre-wrap; }
+
+    /* DETAIL TABS */
+    .detail-tabs { display: flex; border-bottom: 1px solid var(--border); background: var(--surface); flex-wrap: wrap; }
+    .detail-tab { padding: .75rem 1.2rem; border: none; background: none; font-weight: 600; font-size: .85rem; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; transition: .2s; }
+    .detail-tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+    .detail-pane { display: none; padding: 1.25rem; background: var(--surface2); }
+    .detail-pane.active { display: block; }
+
+    /* WELCOME */
+    .welcome { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 400px; text-align: center; color: var(--muted); }
+    .welcome i { font-size: 5rem; opacity: .15; color: var(--primary); margin-bottom: 1rem; }
+
+    /* TOAST */
+    #toasts { position: fixed; bottom: 1rem; right: 1rem; z-index: 9999; display: flex; flex-direction: column; gap: .5rem; }
+    .toast { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: .75rem 1rem; box-shadow: 0 4px 16px rgba(0,0,0,.15); display: flex; align-items: flex-start; gap: .5rem; max-width: 320px; animation: slideIn .2s; }
+    @keyframes slideIn { from { transform: translateX(20px); opacity: 0 } to { transform: none; opacity: 1 } }
+    .toast-success { border-left: 3px solid var(--success); }
+    .toast-danger { border-left: 3px solid var(--danger); }
+    .toast-info { border-left: 3px solid var(--primary); }
+    .toast-warning { border-left: 3px solid var(--warning); }
+    .toast-title { font-weight: 700; font-size: .85rem; }
+    .toast-msg { font-size: .8rem; color: var(--muted); }
+    .spinner-sm { width: 1rem; height: 1rem; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .6s linear infinite; display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg) } }
+    .empty-state { text-align: center; padding: 3rem; color: var(--muted); }
+    .empty-state i { font-size: 2.5rem; opacity: .3; display: block; margin-bottom: .75rem; }
+
+    /* ALERT TRUNCATION */
+    .alert-truncation {
+      background: linear-gradient(135deg, #fff7ed, #fef3c7);
+      border: 1px solid #fde68a;
+      border-left: 4px solid var(--warning);
+      border-radius: 8px;
+      padding: .65rem 1rem;
+      margin-bottom: 1rem;
+      font-size: .82rem;
+      display: flex;
+      align-items: center;
+      gap: .6rem;
+    }
+
+    /* CVE DESCRIPTION TOOLTIP */
+    .cve-link { color: var(--primary); text-decoration: none; font-weight: 700; cursor: pointer; }
+    .cve-link:hover { text-decoration: underline; }
+    .desc-cell { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .78rem; color: var(--muted); cursor: help; }
+
+    /* EXPLOIT BADGE */
+    .badge-exploit { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+    .badge-cisa { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+
+    /* METADATA BAR */
+    .meta-bar {
+      display: flex;
+      gap: .6rem;
+      flex-wrap: wrap;
+      margin-top: .5rem;
+      padding: .5rem .75rem;
+      background: var(--surface2);
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      font-size: .75rem;
+    }
+    .meta-item { display: flex; align-items: center; gap: .3rem; color: var(--muted); font-weight: 600; }
+    .meta-item i { font-size: .8rem; }
+  </style>
+</head>
+
+<body>
+
+  <!-- TOP BAR -->
+  <div class="topbar">
+    <div class="topbar-brand">
+      <i class="bi bi-shield-shaded"></i>
+      Supply Chain Security
     </div>
+    <div style="display:flex;align-items:center;gap:.75rem">
+      <span id="apiBadge" style="display:flex;align-items:center;gap:.4rem;font-size:.8rem;font-weight:600;color:var(--success)">
+        <span class="status-dot"></span> API en ligne
+      </span>
+      <a href="http://localhost:8000/docs" target="_blank" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-book me-1"></i>Swagger
+      </a>
+    </div>
+  </div>
 
-    <div class="main">
+  <div class="main">
 
-      <!-- ========== COLONNE GAUCHE ========== -->
-      <div>
+    <!-- ========== COLONNE GAUCHE ========== -->
+    <div>
 
-        <!-- LANCER UNE ANALYSE -->
-        <div class="card">
-          <div class="card-hd"><i class="bi bi-play-circle text-primary"></i> Nouvelle Analyse</div>
+      <!-- LANCER UNE ANALYSE -->
+      <div class="card">
+        <div class="card-hd"><i class="bi bi-play-circle text-primary"></i> Nouvelle Analyse</div>
 
-          <div class="tab-nav">
-            <button class="tab-btn active" onclick="switchTab('repo')">
-              <i class="bi bi-github me-1"></i>GitHub Repo
-            </button>
-            <button class="tab-btn" onclick="switchTab('docker')">
-              <i class="bi bi-box-seam me-1"></i>Image Docker
-            </button>
-          </div>
-
-          <!-- TAB GITHUB -->
-          <div class="tab-pane active" id="tab-repo">
-            <label class="form-label-sm">Type de scan</label>
-            <div class="scan-type-group" style="margin-bottom:1rem">
-              <div class="scan-type-btn selected" id="btn-standard" onclick="selectScanType('standard')">
-                <div class="label"><i class="bi bi-lightning-charge"></i> Standard</div>
-                <div class="desc">Rapide via OSV (~1–2 min).</div>
-              </div>
-              <div class="scan-type-btn" id="btn-deep" onclick="selectScanType('deep')">
-                <div class="label"><i class="bi bi-microscope"></i> Deep</div>
-                <div class="desc">Complet via NVD + OSV (~5–10 min). Plus précis.</div>
-              </div>
-            </div>
-            <label class="form-label-sm">URL du dépôt GitHub</label>
-            <input id="repoUrl" class="form-control" type="url" placeholder="https://github.com/utilisateur/depot"
-              style="margin-bottom:.75rem">
-            <button class="btn-primary-full" id="btnRepo" onclick="launchRepo()">
-              <i class="bi bi-search"></i> Analyser le Repo
-            </button>
-          </div>
-
-          <!-- TAB DOCKER -->
-          <div class="tab-pane" id="tab-docker">
-            <label class="form-label-sm">Nom de l'image (Docker Hub)</label>
-            <input id="imgName" class="form-control" type="text"
-              placeholder="ex: vulnerables/web-dvwa  ou  python:3.12-slim" style="margin-bottom:.5rem">
-            <p style="font-size:.75rem;color:var(--muted);margin-bottom:.75rem;">
-              <i class="bi bi-info-circle me-1"></i>
-              Entrez uniquement le nom de l'image (sans <code>docker pull</code>). Trivy se charge du reste.
-            </p>
-            <button class="btn-primary-full" id="btnDocker" onclick="launchDocker()">
-              <i class="bi bi-search"></i> Scanner l'image
-            </button>
-          </div>
+        <div class="tab-nav">
+          <button class="tab-btn active" onclick="switchTab('repo')">
+            <i class="bi bi-github me-1"></i>GitHub Repo
+          </button>
+          <button class="tab-btn" onclick="switchTab('docker')">
+            <i class="bi bi-box-seam me-1"></i>Image Docker
+          </button>
         </div>
 
-        <!-- TRACKER -->
-        <div class="tracker" id="tracker">
-          <div style="display:flex;align-items:center;gap:.75rem">
-            <span class="spinner-sm" style="color:var(--warning)"></span>
-            <div>
-              <div style="font-weight:700;font-size:.9rem" id="trackerName">…</div>
-              <div style="font-size:.78rem;color:var(--muted)" id="trackerStatus">En attente…</div>
+        <!-- TAB GITHUB -->
+        <div class="tab-pane active" id="tab-repo">
+          <label class="form-label-sm">Type de scan</label>
+          <div class="scan-type-group" style="margin-bottom:1rem">
+            <div class="scan-type-btn selected" id="btn-standard" onclick="selectScanType('standard')">
+              <div class="label"><i class="bi bi-lightning-charge"></i> Standard</div>
+              <div class="desc">Rapide via OSV (~1–2 min). NVD si CVSS=0.</div>
+            </div>
+            <div class="scan-type-btn" id="btn-deep" onclick="selectScanType('deep')">
+              <div class="label"><i class="bi bi-microscope"></i> Deep</div>
+              <div class="desc">Complet NVD+OSV+CISA KEV (~5–15 min). Très précis.</div>
             </div>
           </div>
+          <label class="form-label-sm">URL du dépôt GitHub</label>
+          <input id="repoUrl" class="form-control" type="url" placeholder="https://github.com/utilisateur/depot" style="margin-bottom:.75rem">
+          <button class="btn-primary-full" id="btnRepo" onclick="launchRepo()">
+            <i class="bi bi-search"></i> Analyser le Repo
+          </button>
         </div>
 
-        <!-- HISTORIQUE -->
-        <div class="card">
-          <div class="card-hd" style="justify-content:space-between">
-            <span><i class="bi bi-clock-history text-secondary"></i> Historique</span>
-            <button onclick="reloadHistory()"
-              style="background:none;border:1px solid var(--border);border-radius:6px;padding:.2rem .5rem;cursor:pointer;font-size:.8rem;color:var(--muted)">
-              <i class="bi bi-arrow-clockwise"></i>
-            </button>
+        <!-- TAB DOCKER -->
+        <div class="tab-pane" id="tab-docker">
+          <label class="form-label-sm">Type de scan</label>
+          <div class="scan-type-group" style="margin-bottom:1rem">
+            <div class="scan-type-btn selected" id="btn-docker-standard" onclick="selectDockerScanType('standard')">
+              <div class="label"><i class="bi bi-lightning-charge"></i> Standard</div>
+              <div class="desc">Vulnérabilités OS uniquement (~1–3 min).</div>
+            </div>
+            <div class="scan-type-btn" id="btn-docker-deep" onclick="selectDockerScanType('deep')">
+              <div class="label"><i class="bi bi-microscope"></i> Deep</div>
+              <div class="desc">Vulns + Secrets + Misconfigs (~5–10 min).</div>
+            </div>
           </div>
-          <div class="tab-nav" id="histTabNav">
-            <button class="tab-btn active" id="histTabRepo" onclick="switchHist('github')">
-              <i class="bi bi-github me-1"></i>Repos
-            </button>
-            <button class="tab-btn" id="histTabDocker" onclick="switchHist('docker')">
-              <i class="bi bi-box-seam me-1"></i>Images
-            </button>
-          </div>
-          <div id="histList" style="max-height:380px;overflow-y:auto;"></div>
+          <label class="form-label-sm">Nom de l'image (Docker Hub)</label>
+          <input id="imgName" class="form-control" type="text" placeholder="ex: vulnerables/web-dvwa  ou  python:3.12-slim" style="margin-bottom:.5rem">
+          <p style="font-size:.75rem;color:var(--muted);margin-bottom:.75rem;">
+            <i class="bi bi-info-circle me-1"></i>
+            Entrez uniquement le nom de l'image (sans <code>docker pull</code>). Trivy se charge du reste.
+          </p>
+          <button class="btn-primary-full" id="btnDocker" onclick="launchDocker()">
+            <i class="bi bi-search"></i> Scanner l'image
+          </button>
         </div>
-
       </div>
 
-      <!-- ========== COLONNE DROITE — RÉSULTATS ========== -->
-      <div id="rightPanel">
-        <div class="welcome" id="welcomeMsg">
-          <i class="bi bi-shield-check"></i>
-          <h5 style="font-weight:700;color:var(--text)">Prêt à analyser</h5>
-          <p style="max-width:380px">Lancez un scan à gauche ou cliquez sur un élément de l'historique pour afficher les
-            résultats.</p>
-        </div>
-
-        <div id="resultPanel" style="display:none">
-
-          <!-- OVERVIEW -->
-          <div class="card" style="margin-bottom:1.25rem">
-            <div class="card-bd">
-              <div style="display:grid;grid-template-columns:auto 1fr auto;gap:1.5rem;align-items:center">
-                <!-- Score -->
-                <div style="text-align:center">
-                  <div class="score-ring" id="scoreRing">
-                    <span id="scoreVal">—</span>
-                  </div>
-                  <div
-                    style="font-size:.72rem;font-weight:700;margin-top:.4rem;text-transform:uppercase;letter-spacing:.04em"
-                    id="riskLbl">Risque inconnu</div>
-                </div>
-                <!-- Info -->
-                <div>
-                  <h4 style="font-weight:800;margin:0 0 .4rem" id="resName">—</h4>
-                  <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.5rem">
-                    <span id="resStatus"></span>
-                    <span id="resScanType"></span>
-                    <span id="resTypeTag"></span>
-                  </div>
-                  <div style="font-size:.78rem;color:var(--muted)">
-                    <i class="bi bi-clock me-1"></i><span id="resDate">—</span>
-                  </div>
-                </div>
-                <!-- Matrice -->
-                <div class="matrix-wrap">
-                  <span class="axis-lbl" style="margin-bottom:2px">Sévérité ↑</span>
-                  <div class="matrix-grid" id="matrixGrid">
-                    <!-- row 3: HIGH severity -->
-                    <div class="mc mc-empty" id="m33">0</div>
-                    <div class="mc mc-C" id="m32">0</div>
-                    <div class="mc mc-C" id="m31">0</div>
-                    <!-- row 2: MED severity -->
-                    <div class="mc mc-empty" id="m23">0</div>
-                    <div class="mc mc-empty" id="m22">0</div>
-                    <div class="mc mc-H" id="m21">0</div>
-                    <!-- row 1: LOW severity -->
-                    <div class="mc mc-empty" id="m13">0</div>
-                    <div class="mc mc-empty" id="m12">0</div>
-                    <div class="mc mc-empty" id="m11">0</div>
-                  </div>
-                  <span class="axis-lbl" style="margin-top:2px">→ Exploitabilité</span>
-                </div>
-              </div>
-            </div>
+      <!-- TRACKER PROGRESSIF -->
+      <div class="tracker" id="tracker">
+        <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:.75rem">
+          <span class="spinner-sm" style="color:var(--warning)"></span>
+          <div>
+            <div style="font-weight:700;font-size:.9rem" id="trackerName">…</div>
+            <div style="font-size:.78rem;color:var(--muted)" id="trackerStatus">En attente…</div>
           </div>
-
-          <!-- DETAIL TABS -->
-          <div class="card" style="overflow:visible">
-            <div class="detail-tabs">
-              <button class="detail-tab active" onclick="showDetailTab('recs')"><i
-                  class="bi bi-robot me-1"></i>Recommandations IA <span class="badge badge-standard ms-1"
-                  id="cntRecs">0</span></button>
-              <button class="detail-tab" onclick="showDetailTab('vulns')"><i class="bi bi-bug me-1"></i>Vulnérabilités
-                <span class="badge badge-standard ms-1" id="cntVulns">0</span></button>
-              <button class="detail-tab" id="depsTabBtn" onclick="showDetailTab('deps')"><i
-                  class="bi bi-box-seam me-1"></i>Dépendances <span class="badge badge-standard ms-1"
-                  id="cntDeps">0</span></button>
-              <button class="detail-tab" id="dockerTabBtn" onclick="showDetailTab('dockerRes')"><i
-                  class="bi bi-hdd-network me-1"></i>Résultat Docker</button>
-            </div>
-
-            <!-- RECS -->
-            <div class="detail-pane active" id="pane-recs">
-              <div id="recsList"></div>
-            </div>
-            <!-- VULNS -->
-            <div class="detail-pane" id="pane-vulns">
-              <div style="overflow-x:auto">
-                <table class="res-table">
-                  <thead>
-                    <tr>
-                      <th>CVE</th>
-                      <th>Package</th>
-                      <th>Sévérité</th>
-                      <th>CVSS</th>
-                      <th>Patch dispo</th>
-                      <th>Exploit</th>
-                    </tr>
-                  </thead>
-                  <tbody id="vulnsTbody"></tbody>
-                </table>
-              </div>
-            </div>
-            <!-- DEPS -->
-            <div class="detail-pane" id="pane-deps">
-              <div style="overflow-x:auto">
-                <table class="res-table">
-                  <thead>
-                    <tr>
-                      <th>Package</th>
-                      <th>Version</th>
-                      <th>Écosystème</th>
-                      <th>Vulnérabilités</th>
-                      <th>Obsolète</th>
-                    </tr>
-                  </thead>
-                  <tbody id="depsTbody"></tbody>
-                </table>
-              </div>
-            </div>
-            <!-- DOCKER RESULT -->
-            <div class="detail-pane" id="pane-dockerRes">
-              <div id="dockerResContent"></div>
-            </div>
-          </div>
-
         </div>
+        <!-- Barre de progrès -->
+        <div style="background:#fde68a;border-radius:4px;height:4px;margin-bottom:.75rem;overflow:hidden">
+          <div id="trackerBar" style="height:100%;background:#f59e0b;border-radius:4px;width:5%;transition:width 0.5s ease"></div>
+        </div>
+        <!-- Live stats -->
+        <div id="trackerLiveStats" style="display:flex;gap:.75rem;flex-wrap:wrap">
+          <span style="font-size:.76rem;background:#fff;border-radius:4px;padding:.2rem .45rem;font-weight:600">
+            <i class="bi bi-box-seam" style="color:#6366f1"></i>
+            <span id="liveDepCount">0</span> dépendances
+          </span>
+          <span style="font-size:.76rem;background:#fff;border-radius:4px;padding:.2rem .45rem;font-weight:600">
+            <i class="bi bi-bug" style="color:#ef4444"></i>
+            <span id="liveVulnCount">0</span> CVE
+          </span>
+          <span style="font-size:.76rem;background:#fff;border-radius:4px;padding:.2rem .45rem;font-weight:600;color:#dc2626">
+            <i class="bi bi-exclamation-diamond"></i>
+            <span id="liveCritCount">0</span> CRITICAL
+          </span>
+          <span style="font-size:.76rem;background:#fff;border-radius:4px;padding:.2rem .45rem;font-weight:600;color:#d97706">
+            <span id="liveHighCount">0</span> HIGH
+          </span>
+        </div>
+        <!-- Étapes du scan -->
+        <div id="scanSteps" style="margin-top:.75rem;display:flex;gap:.4rem;flex-wrap:wrap">
+          <span class="step-badge" id="step-clone"><i class="bi bi-cloud-download"></i> Clonage</span>
+          <span class="step-badge" id="step-deps"><i class="bi bi-box-seam"></i> Dépendances</span>
+          <span class="step-badge" id="step-cve"><i class="bi bi-bug"></i> CVE Scan</span>
+          <span class="step-badge" id="step-docker"><i class="bi bi-hdd-network"></i> Docker</span>
+          <span class="step-badge" id="step-score"><i class="bi bi-shield-check"></i> Score</span>
+          <span class="step-badge" id="step-ai"><i class="bi bi-robot"></i> IA</span>
+          <span class="step-badge" id="step-done"><i class="bi bi-check-circle"></i> Rapport</span>
+        </div>
+      </div>
+
+      <!-- HISTORIQUE -->
+      <div class="card">
+        <div class="card-hd" style="justify-content:space-between">
+          <span><i class="bi bi-clock-history text-secondary"></i> Historique</span>
+          <button onclick="reloadHistory()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:.2rem .5rem;cursor:pointer;font-size:.8rem;color:var(--muted)">
+            <i class="bi bi-arrow-clockwise"></i>
+          </button>
+        </div>
+        <div class="tab-nav" id="histTabNav">
+          <button class="tab-btn active" id="histTabRepo" onclick="switchHist('github')">
+            <i class="bi bi-github me-1"></i>Repos
+          </button>
+          <button class="tab-btn" id="histTabDocker" onclick="switchHist('docker')">
+            <i class="bi bi-box-seam me-1"></i>Images
+          </button>
+        </div>
+        <div id="histList" style="max-height:380px;overflow-y:auto;"></div>
       </div>
 
     </div>
 
-    <div id="toasts"></div>
+    <!-- ========== COLONNE DROITE — RÉSULTATS ========== -->
+    <div id="rightPanel">
+      <div class="welcome" id="welcomeMsg">
+        <i class="bi bi-shield-check"></i>
+        <h5 style="font-weight:700;color:var(--text)">Prêt à analyser</h5>
+        <p style="max-width:380px">Lancez un scan à gauche ou cliquez sur un élément de l'historique pour afficher les résultats.</p>
+      </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-      const API = 'http://localhost:8000/api/v1';
-      let curTab = 'repo';
-      let curHistType = 'github';
-      let curScanType = 'standard';
-      let curAnalysisId = null;
-      let trackTimer = null;
+      <div id="resultPanel" style="display:none">
 
-      /* ── TABS (scan form) ── */
-      function switchTab(t) {
-        curTab = t;
-        document.querySelectorAll('.tab-nav:first-of-type .tab-btn').forEach((b, i) => b.classList.toggle('active', (i === 0 && t === 'repo') || (i === 1 && t === 'docker')));
-        document.getElementById('tab-repo').classList.toggle('active', t === 'repo');
-        document.getElementById('tab-docker').classList.toggle('active', t === 'docker');
-      }
+        <!-- OVERVIEW -->
+        <div class="card" style="margin-bottom:1.25rem">
+          <div class="card-bd">
+            <div style="display:grid;grid-template-columns:auto 1fr auto;gap:1.5rem;align-items:center">
+              <!-- Score -->
+              <div style="text-align:center">
+                <div class="score-ring" id="scoreRing">
+                  <span id="scoreVal">—</span>
+                </div>
+                <div style="font-size:.72rem;font-weight:700;margin-top:.4rem;text-transform:uppercase;letter-spacing:.04em" id="riskLbl">Risque inconnu</div>
+              </div>
+              <!-- Info -->
+              <div>
+                <h4 style="font-weight:800;margin:0 0 .4rem" id="resName">—</h4>
+                <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.4rem">
+                  <span id="resStatus"></span>
+                  <span id="resScanType"></span>
+                  <span id="resTypeTag"></span>
+                </div>
+                <div class="meta-bar" id="metaBar">
+                  <span class="meta-item">
+                    <i class="bi bi-clock"></i>
+                    <span id="resDate">—</span>
+                  </span>
+                  <span class="meta-item" id="metaMoteur" style="display:none">
+                    <i class="bi bi-cpu"></i>
+                    <span id="resCVEVersion">—</span>
+                  </span>
+                  <span class="meta-item" id="metaTruncation" style="display:none">
+                    <i class="bi bi-exclamation-triangle" style="color:var(--warning)"></i>
+                    <span id="resTruncation" style="color:var(--warning)">—</span>
+                  </span>
+                </div>
+                <!-- Boutons d'action -->
+                <div style="display:flex;gap:.5rem;margin-top:.6rem;flex-wrap:wrap" id="actionBtns">
+                  <a id="btnPDF" href="#" target="_blank"
+                    style="display:none;align-items:center;gap:.35rem;background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:6px;padding:.3rem .75rem;font-size:.8rem;font-weight:700;text-decoration:none">
+                    <i class="bi bi-file-pdf"></i> Rapport PDF
+                  </a>
+                  <button onclick="loadDetail(curAnalysisId)"
+                    style="display:flex;align-items:center;gap:.35rem;background:var(--surface2);color:var(--muted);border:1px solid var(--border);border-radius:6px;padding:.3rem .75rem;font-size:.8rem;font-weight:700;cursor:pointer">
+                    <i class="bi bi-arrow-clockwise"></i> Actualiser
+                  </button>
+                </div>
+              </div>
+              <!-- Matrice de risque -->
+              <div class="matrix-wrap">
+                <span class="axis-lbl" style="margin-bottom:2px">Sévérité (Impact) ↑</span>
+                <div class="matrix-grid" id="matrixGrid">
+                  <!-- row 4: CRITICAL severity -->
+                  <div class="mc mc-empty" id="m41">0</div><div class="mc mc-empty" id="m42">0</div><div class="mc mc-empty" id="m43">0</div><div class="mc mc-empty" id="m44">0</div>
+                  <!-- row 3: HIGH severity -->
+                  <div class="mc mc-empty" id="m31">0</div><div class="mc mc-empty" id="m32">0</div><div class="mc mc-empty" id="m33">0</div><div class="mc mc-empty" id="m34">0</div>
+                  <!-- row 2: MED severity -->
+                  <div class="mc mc-empty" id="m21">0</div><div class="mc mc-empty" id="m22">0</div><div class="mc mc-empty" id="m23">0</div><div class="mc mc-empty" id="m24">0</div>
+                  <!-- row 1: LOW severity -->
+                  <div class="mc mc-empty" id="m11">0</div><div class="mc mc-empty" id="m12">0</div><div class="mc mc-empty" id="m13">0</div><div class="mc mc-empty" id="m14">0</div>
+                </div>
+                <span class="axis-lbl" style="margin-top:2px">→ CVSS (Probabilité)</span>
+              </div>
+            </div>
+          </div>
+          <!-- Légende de la matrice -->
+          <div style="padding:.75rem 1.25rem;background:var(--surface2);border-top:1px solid var(--border)">
+            <div style="font-size:.72rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:.4rem">
+              <i class="bi bi-info-circle me-1"></i>Comment lire la matrice de risque
+            </div>
+            <div style="display:flex;gap:.5rem;flex-wrap:wrap;font-size:.73rem">
+              <span style="background:#10b981;color:#fff;padding:.1rem .35rem;border-radius:3px;font-weight:700">Vert = LOW</span>
+              <span style="background:#f59e0b;color:#fff;padding:.1rem .35rem;border-radius:3px;font-weight:700">Jaune = MEDIUM</span>
+              <span style="background:#f97316;color:#fff;padding:.1rem .35rem;border-radius:3px;font-weight:700">Orange = HIGH</span>
+              <span style="background:#ef4444;color:#fff;padding:.1rem .35rem;border-radius:3px;font-weight:700">Rouge = CRITICAL</span>
+              <span style="color:var(--muted);font-size:.73rem;align-self:center">· Chiffre = nombre de CVE dans cette zone de risque</span>
+            </div>
+          </div>
+        </div>
 
-      /* ── SCAN TYPE (Standard / Deep) ── */
-      function selectScanType(t) {
-        curScanType = t;
-        document.getElementById('btn-standard').classList.toggle('selected', t === 'standard');
-        document.getElementById('btn-deep').classList.toggle('selected', t === 'deep');
-      }
+        <!-- DETAIL TABS -->
+        <div class="card" style="overflow:visible">
+          <div class="detail-tabs">
+            <button class="detail-tab active" onclick="showDetailTab('recs')"><i class="bi bi-robot me-1"></i>Recommandations IA <span class="badge badge-standard ms-1" id="cntRecs">0</span></button>
+            <button class="detail-tab" onclick="showDetailTab('vulns')"><i class="bi bi-bug me-1"></i>Vulnérabilités <span class="badge badge-standard ms-1" id="cntVulns">0</span></button>
+            <button class="detail-tab" id="depsTabBtn" onclick="showDetailTab('deps')"><i class="bi bi-box-seam me-1"></i>Dépendances <span class="badge badge-standard ms-1" id="cntDeps">0</span></button>
+            <button class="detail-tab" id="dockerTabBtn" onclick="showDetailTab('dockerRes')"><i class="bi bi-hdd-network me-1"></i>Résultat Docker</button>
+          </div>
 
-      /* ── HISTORY TABS ── */
-      function switchHist(type) {
-        curHistType = type;
-        document.getElementById('histTabRepo').classList.toggle('active', type === 'github');
-        document.getElementById('histTabDocker').classList.toggle('active', type === 'docker');
+          <!-- RECS -->
+          <div class="detail-pane active" id="pane-recs">
+            <div id="recsList"></div>
+          </div>
+
+          <!-- VULNS -->
+          <div class="detail-pane" id="pane-vulns">
+            <div id="vulnFilters" style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.75rem">
+              <button class="badge badge-failed" id="filterC" onclick="filterVulns('CRITICAL')" style="cursor:pointer;border:none">CRITICAL</button>
+              <button class="badge badge-pending" id="filterH" onclick="filterVulns('HIGH')" style="cursor:pointer;border:none;background:#fff7ed;color:#c2410c">HIGH</button>
+              <button class="badge badge-pending" id="filterM" onclick="filterVulns('MEDIUM')" style="cursor:pointer;border:none">MEDIUM</button>
+              <button class="badge badge-done" id="filterL" onclick="filterVulns('LOW')" style="cursor:pointer;border:none">LOW</button>
+              <button class="badge badge-standard" id="filterAll" onclick="filterVulns('ALL')" style="cursor:pointer;border:none">Tout</button>
+              <span id="vulnFilterInfo" style="font-size:.75rem;color:var(--muted);align-self:center;margin-left:.25rem"></span>
+            </div>
+            <div style="overflow-x:auto">
+              <table class="res-table">
+                <thead>
+                  <tr>
+                    <th>CVE ID</th>
+                    <th>Package</th>
+                    <th>Sévérité</th>
+                    <th>CVSS</th>
+                    <th>Correction</th>
+                    <th>Exploit</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody id="vulnsTbody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- DEPS -->
+          <div class="detail-pane" id="pane-deps">
+            <div id="depsTruncationBanner" style="display:none"></div>
+            <div style="overflow-x:auto">
+              <table class="res-table">
+                <thead>
+                  <tr>
+                    <th>Package</th>
+                    <th>Version</th>
+                    <th>Écosystème</th>
+                    <th>Vulnérabilités</th>
+                    <th>Obsolète</th>
+                  </tr>
+                </thead>
+                <tbody id="depsTbody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- DOCKER RESULT -->
+          <div class="detail-pane" id="pane-dockerRes">
+            <div id="dockerResContent"></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+
+  <div id="toasts"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    const API = 'http://localhost:8000/api/v1';
+    let curTab = 'repo';
+    let curHistType = 'github';
+    let curScanType = 'standard';
+    let curDockerScanType = 'standard';
+    let curAnalysisId = null;
+    let trackTimer = null;
+
+    // Données pour filtrage des vulnérabilités
+    let allVulnsData = [];
+    let vulnFilter = 'ALL';
+
+    /* ── DOCKER SCAN TYPE ── */
+    function selectDockerScanType(t) {
+      curDockerScanType = t;
+      document.getElementById('btn-docker-standard').classList.toggle('selected', t === 'standard');
+      document.getElementById('btn-docker-deep').classList.toggle('selected', t === 'deep');
+    }
+
+    /* ── TABS (scan form) ── */
+    function switchTab(t) {
+      curTab = t;
+      document.querySelectorAll('.tab-nav:first-of-type .tab-btn').forEach((b, i) =>
+        b.classList.toggle('active', (i === 0 && t === 'repo') || (i === 1 && t === 'docker'))
+      );
+      document.getElementById('tab-repo').classList.toggle('active', t === 'repo');
+      document.getElementById('tab-docker').classList.toggle('active', t === 'docker');
+    }
+
+    /* ── SCAN TYPE ── */
+    function selectScanType(t) {
+      curScanType = t;
+      document.getElementById('btn-standard').classList.toggle('selected', t === 'standard');
+      document.getElementById('btn-deep').classList.toggle('selected', t === 'deep');
+    }
+
+    /* ── HISTORY TABS ── */
+    function switchHist(type) {
+      curHistType = type;
+      document.getElementById('histTabRepo').classList.toggle('active', type === 'github');
+      document.getElementById('histTabDocker').classList.toggle('active', type === 'docker');
+      loadHistory();
+    }
+
+    /* ── TOAST ── */
+    function toast(title, msg, type = 'info') {
+      const el = document.createElement('div');
+      el.className = `toast toast-${type}`;
+      el.innerHTML = `<div>
+        <div class="toast-title">${title}</div>
+        ${msg ? `<div class="toast-msg">${msg}</div>` : ''}
+      </div>
+      <button onclick="this.parentElement.remove()" style="background:none;border:none;margin-left:auto;color:var(--muted);font-size:1.1rem;cursor:pointer;">&times;</button>`;
+      document.getElementById('toasts').appendChild(el);
+      setTimeout(() => el.remove(), 6000);
+    }
+
+    /* ── HEALTH ── */
+    async function checkHealth() {
+      try {
+        const r = await fetch(`${API}/health`);
+        if (!r.ok) throw new Error();
+        document.getElementById('apiBadge').innerHTML = `<span class="status-dot"></span> API en ligne`;
+        document.getElementById('apiBadge').style.color = 'var(--success)';
         loadHistory();
+      } catch {
+        document.getElementById('apiBadge').innerHTML = `<span style="width:8px;height:8px;border-radius:50%;background:var(--danger);display:inline-block"></span> API hors ligne`;
+        document.getElementById('apiBadge').style.color = 'var(--danger)';
       }
+    }
 
-      /* ── TOAST ── */
-      function toast(title, msg, type = 'info') {
-        const el = document.createElement('div');
-        el.className = `toast toast-${type}`;
-        el.innerHTML = `<div>
-      <div class="toast-title">${title}</div>
-      ${msg ? `<div class="toast-msg">${msg}</div>` : ''}
-    </div>
-    <button onclick="this.parentElement.remove()" style="background:none;border:none;margin-left:auto;color:var(--muted);font-size:1.1rem;cursor:pointer;">&times;</button>`;
-        document.getElementById('toasts').appendChild(el);
-        setTimeout(() => el.remove(), 6000);
-      }
-
-      /* ── HEALTH ── */
-      async function checkHealth() {
-        try {
-          const r = await fetch(`${API}/health`);
-          if (!r.ok) throw new Error();
-          document.getElementById('apiBadge').innerHTML = `<span class="status-dot"></span> API en ligne`;
-          document.getElementById('apiBadge').style.color = 'var(--success)';
-          loadHistory();
-        } catch {
-          document.getElementById('apiBadge').innerHTML = `<span style="width:8px;height:8px;border-radius:50%;background:var(--danger);display:inline-block"></span> API hors ligne`;
-          document.getElementById('apiBadge').style.color = 'var(--danger)';
+    /* ── LOAD HISTORY ── */
+    async function loadHistory() {
+      const box = document.getElementById('histList');
+      box.innerHTML = `<div class="empty-state"><span class="spinner-sm"></span></div>`;
+      try {
+        const r = await fetch(`${API}/analyses?limit=20&target_type=${curHistType}`);
+        const data = await r.json();
+        if (!Array.isArray(data) || !data.length) {
+          box.innerHTML = `<div class="empty-state"><i class="bi bi-inbox"></i>Aucun historique pour ce type</div>`;
+          return;
         }
-      }
-
-      /* ── LOAD HISTORY ── */
-      async function loadHistory() {
-        const box = document.getElementById('histList');
-        box.innerHTML = `<div class="empty-state"><span class="spinner-sm"></span></div>`;
-        try {
-          const r = await fetch(`${API}/analyses?limit=20&target_type=${curHistType}`);
-          const data = await r.json();
-          if (!Array.isArray(data) || !data.length) {
-            box.innerHTML = `<div class="empty-state"><i class="bi bi-inbox"></i>Aucun historique pour ce type</div>`;
-            return;
-          }
-          box.innerHTML = data.map(a => {
-            const sc = a.security_score !== null && a.security_score !== undefined ? Math.round(a.security_score) : null;
-            const scColor = sc === null ? 'var(--muted)' : sc >= 80 ? 'var(--success)' : sc >= 50 ? 'var(--warning)' : 'var(--danger)';
-            const scanBadge = a.scan_type === 'deep'
-              ? `<span class="badge badge-deep" style="margin-left:auto">${a.scan_type}</span>`
-              : `<span class="badge badge-standard" style="margin-left:auto">${a.scan_type || 'standard'}</span>`;
-            return `
+        box.innerHTML = data.map(a => {
+          const sc = a.security_score !== null && a.security_score !== undefined ? Math.round(a.security_score) : null;
+          const scColor = sc === null ? 'var(--muted)' : sc >= 80 ? 'var(--success)' : sc >= 50 ? 'var(--warning)' : 'var(--danger)';
+          const scanBadge = a.scan_type === 'deep'
+            ? `<span class="badge badge-deep" style="margin-left:auto">${a.scan_type}</span>`
+            : `<span class="badge badge-standard" style="margin-left:auto">${a.scan_type || 'standard'}</span>`;
+          // Afficher icône si scan partiel
+          const truncIcon = a.dependencies_truncated
+            ? `<span title="Scan partiel: ${a.dependencies_scanned_count}/${a.dependencies_total_count} dépendances" style="color:var(--warning);font-size:.8rem"><i class="bi bi-exclamation-triangle-fill"></i></span>`
+            : '';
+          return `
           <div class="hist-item" onclick="loadDetail(${a.id})">
             <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.25rem">
               <span class="hist-name">${a.repo_name}</span>
               ${statusBadge(a.status)}
               ${scanBadge}
+              ${truncIcon}
             </div>
             <div style="display:flex;align-items:center;justify-content:space-between">
               <span class="hist-meta">${new Date(a.created_at).toLocaleString('fr-FR')}</span>
               ${sc !== null ? `<span style="font-weight:700;font-size:.85rem;color:${scColor}">${sc}/100</span>` : ''}
             </div>
           </div>`;
-          }).join('');
-        } catch (e) {
-          box.innerHTML = `<div class="empty-state" style="color:var(--danger)"><i class="bi bi-exclamation-triangle"></i>Erreur de chargement</div>`;
-        }
+        }).join('');
+      } catch (e) {
+        box.innerHTML = `<div class="empty-state" style="color:var(--danger)"><i class="bi bi-exclamation-triangle"></i>Erreur de chargement</div>`;
+      }
+    }
+
+    function reloadHistory() { loadHistory(); }
+
+    /* ── BADGES ── */
+    function statusBadge(s) {
+      const m = { pending: ['badge-pending', 'clock'], running: ['badge-running', 'arrow-repeat'], done: ['badge-done', 'check-circle'], failed: ['badge-failed', 'x-circle'] };
+      const [cls, icon] = m[s?.toLowerCase()] || ['badge-pending', 'question'];
+      return `<span class="badge ${cls}"><i class="bi bi-${icon}"></i>${(s || '').toUpperCase()}</span>`;
+    }
+
+    function sevBadge(s) {
+      const colors = { CRITICAL: '#dc2626', HIGH: '#d97706', MEDIUM: '#6b7280', LOW: '#94a3b8' };
+      const up = (s || '').toUpperCase();
+      return `<span class="badge" style="background:${colors[up] || '#e2e8f0'};color:#fff">${up}</span>`;
+    }
+
+    /* ── LAUNCH REPO ── */
+    async function launchRepo() {
+      const raw = document.getElementById('repoUrl').value.trim();
+      if (!raw) return toast('Champ vide', 'Entrez l\'URL GitHub', 'danger');
+
+      let url = raw.replace(/\.git$/, '').replace(/\/$/, '');
+      if (!url.startsWith('https://github.com/')) {
+        return toast('URL invalide', 'L\'URL doit commencer par https://github.com/', 'danger');
       }
 
-      function reloadHistory() { loadHistory(); }
-
-      /* ── BADGES ── */
-      function statusBadge(s) {
-        const m = { pending: ['badge-pending', 'clock'], running: ['badge-running', 'arrow-repeat'], done: ['badge-done', 'check-circle'], failed: ['badge-failed', 'x-circle'] };
-        const [cls, icon] = m[s?.toLowerCase()] || ['badge-pending', 'question'];
-        return `<span class="badge ${cls}"><i class="bi bi-${icon}"></i>${(s || '').toUpperCase()}</span>`;
+      const btn = document.getElementById('btnRepo');
+      btn.disabled = true;
+      btn.innerHTML = `<span class="spinner-sm"></span> Envoi en cours…`;
+      try {
+        const r = await fetch(`${API}/analyze`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ repo_url: url, scan_type: curScanType })
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.detail || 'Erreur API');
+        toast('✅ Analyse lancée', `${data.repo_name} — Scan ${curScanType.toUpperCase()}`, 'success');
+        curHistType = 'github';
+        document.getElementById('histTabRepo').classList.add('active');
+        document.getElementById('histTabDocker').classList.remove('active');
+        loadHistory();
+        startTracker(data.id, data.repo_name);
+      } catch (e) {
+        toast('Erreur', e.message, 'danger');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = `<i class="bi bi-search"></i> Analyser le Repo`;
       }
-      function sevBadge(s) {
-        const m = { CRITICAL: 'badge-failed', HIGH: 'badge', MEDIUM: 'badge-pending', LOW: 'badge-pending' };
-        const colors = { CRITICAL: '#dc2626', HIGH: '#d97706', MEDIUM: '#6b7280', LOW: '#94a3b8' };
-        const up = (s || '').toUpperCase();
-        return `<span class="badge" style="background:${colors[up] || '#e2e8f0'};color:#fff">${up}</span>`;
+    }
+
+    /* ── LAUNCH DOCKER ── */
+    async function launchDocker() {
+      const raw = document.getElementById('imgName').value.trim();
+      if (!raw) return toast('Champ vide', 'Entrez un nom d\'image Docker', 'danger');
+
+      const imageName = raw
+        .replace(/^docker\s+pull\s+/i, '')
+        .replace(/^https?:\/\/hub\.docker\.com\/r\//i, '')
+        .replace(/\/$/, '')
+        .trim();
+
+      if (!imageName) return toast('Image invalide', 'Nom d\'image non reconnu', 'danger');
+
+      const btn = document.getElementById('btnDocker');
+      btn.disabled = true;
+      btn.innerHTML = `<span class="spinner-sm"></span> Lancement du scan Trivy…`;
+      try {
+        const r = await fetch(`${API}/analyze/docker`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image_name: imageName, scan_type: curDockerScanType })
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.detail || 'Erreur API');
+        toast('✅ Scan Docker lancé', `Image : ${imageName}`, 'success');
+        curHistType = 'docker';
+        document.getElementById('histTabRepo').classList.remove('active');
+        document.getElementById('histTabDocker').classList.add('active');
+        loadHistory();
+        startTracker(data.id, imageName);
+      } catch (e) {
+        toast('Erreur', e.message, 'danger');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = `<i class="bi bi-search"></i> Scanner l'image`;
       }
+    }
 
-      /* ── LAUNCH REPO ── */
-      async function launchRepo() {
-        const raw = document.getElementById('repoUrl').value.trim();
-        if (!raw) return toast('Champ vide', 'Entrez l\'URL GitHub', 'danger');
+    /* ── TRACKER PROGRESSIF ── */
+    let prevProgress = null;
 
-        // Nettoyage côté client
-        let url = raw.replace(/\.git$/, '').replace(/\/$/, '');
-        if (!url.startsWith('https://github.com/')) {
-          return toast('URL invalide', 'L\'URL doit commencer par https://github.com/', 'danger');
-        }
+    function resetStepBadges() {
+      ['clone', 'deps', 'cve', 'docker', 'score', 'ai', 'done'].forEach(s =>
+        document.getElementById('step-' + s).className = 'step-badge'
+      );
+      document.getElementById('trackerBar').style.width = '5%';
+    }
 
-        const btn = document.getElementById('btnRepo');
-        btn.disabled = true;
-        btn.innerHTML = `<span class="spinner-sm"></span> Envoi en cours…`;
+    function updateStepBadge(stepId, state) {
+      const el = document.getElementById('step-' + stepId);
+      if (el) el.className = 'step-badge ' + state;
+    }
+
+    function inferStepsFromProgress(prog) {
+      const steps = ['clone', 'deps', 'cve', 'docker', 'score', 'ai', 'done'];
+      const weights = [10, 25, 50, 65, 75, 90, 100];
+
+      let curStep = 0;
+      if (prog.total_deps > 0) curStep = 1;
+      if (prog.total_vulns > 0) curStep = 2;
+      if (prog.has_docker) curStep = 3;
+      if (prog.security_score !== null) curStep = 4;
+      if (prog.total_recommendations > 0) curStep = 5;
+      if (prog.status === 'done') curStep = 6;
+
+      steps.forEach((s, i) => {
+        if (i < curStep) updateStepBadge(s, 'done');
+        else if (i === curStep) updateStepBadge(s, 'active');
+        else updateStepBadge(s, '');
+      });
+
+      document.getElementById('trackerBar').style.width = weights[curStep] + '%';
+      return steps[curStep];
+    }
+
+    function startTracker(id, name) {
+      if (trackTimer) clearInterval(trackTimer);
+      prevProgress = null;
+      resetStepBadges();
+      const tracker = document.getElementById('tracker');
+      tracker.style.display = 'block';
+      document.getElementById('trackerName').textContent = name;
+      document.getElementById('trackerStatus').textContent = 'PENDING — démarrage…';
+      document.getElementById('liveDepCount').textContent = '0';
+      document.getElementById('liveVulnCount').textContent = '0';
+      document.getElementById('liveCritCount').textContent = '0';
+      document.getElementById('liveHighCount').textContent = '0';
+
+      document.getElementById('welcomeMsg').style.display = 'none';
+      document.getElementById('resultPanel').style.display = 'block';
+      curAnalysisId = id;
+      updateStepBadge('clone', 'active');
+
+      trackTimer = setInterval(async () => {
         try {
-          const r = await fetch(`${API}/analyze`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ repo_url: url, scan_type: curScanType })
-          });
-          const data = await r.json();
-          if (!r.ok) throw new Error(data.detail || 'Erreur API');
-          toast('✅ Analyse lancée', `${data.repo_name} — Scan ${curScanType.toUpperCase()}`, 'success');
-          curHistType = 'github';
-          document.getElementById('histTabRepo').classList.add('active');
-          document.getElementById('histTabDocker').classList.remove('active');
-          loadHistory();
-          startTracker(data.id, data.repo_name);
-        } catch (e) {
-          toast('Erreur', e.message, 'danger');
-        } finally {
-          btn.disabled = false;
-          btn.innerHTML = `<i class="bi bi-search"></i> Analyser le Repo`;
-        }
-      }
+          const pr = await fetch(`${API}/analyses/${id}/progress`);
+          const prog = await pr.json();
 
-      /* ── LAUNCH DOCKER ── */
-      async function launchDocker() {
-        const raw = document.getElementById('imgName').value.trim();
-        if (!raw) return toast('Champ vide', 'Entrez un nom d\'image Docker', 'danger');
+          const currentStep = inferStepsFromProgress(prog);
 
-        // Nettoyer les préfixes éventuels
-        const imageName = raw
-          .replace(/^docker\s+pull\s+/i, '')
-          .replace(/^https?:\/\/hub\.docker\.com\/r\//i, '')
-          .replace(/\/$/, '')
-          .trim();
+          document.getElementById('liveDepCount').textContent = prog.total_deps;
+          document.getElementById('liveVulnCount').textContent = prog.total_vulns;
+          document.getElementById('liveCritCount').textContent = prog.vulns_by_severity?.CRITICAL || 0;
+          document.getElementById('liveHighCount').textContent = prog.vulns_by_severity?.HIGH || 0;
 
-        if (!imageName) return toast('Image invalide', 'Nom d\'image non reconnu', 'danger');
+          const stepLabels = {
+            clone: 'Clonage du dépôt en cours…',
+            deps: `Détection des dépendances… (${prog.total_deps} trouvées)`,
+            cve: `Scan CVE en cours… (${prog.total_vulns} CVE détectées jusqu'ici)`,
+            docker: 'Analyse Docker / Trivy en cours…',
+            score: 'Calcul du Security Score…',
+            ai: 'Génération des recommandations IA…',
+            done: 'Analyse complète !'
+          };
+          document.getElementById('trackerStatus').textContent =
+            `${(prog.status || '').toUpperCase()} — ${stepLabels[currentStep] || ''}`;
 
-        const btn = document.getElementById('btnDocker');
-        btn.disabled = true;
-        btn.innerHTML = `<span class="spinner-sm"></span> Lancement du scan Trivy…`;
-        try {
-          const r = await fetch(`${API}/analyze/docker`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ image_name: imageName })
-          });
-          const data = await r.json();
-          if (!r.ok) throw new Error(data.detail || 'Erreur API');
-          toast('✅ Scan Docker lancé', `Image : ${imageName}`, 'success');
-          curHistType = 'docker';
-          document.getElementById('histTabRepo').classList.remove('active');
-          document.getElementById('histTabDocker').classList.add('active');
-          loadHistory();
-          startTracker(data.id, imageName);
-        } catch (e) {
-          toast('Erreur', e.message, 'danger');
-        } finally {
-          btn.disabled = false;
-          btn.innerHTML = `<i class="bi bi-search"></i> Scanner l'image`;
-        }
-      }
-
-      /* ── TRACKER ── */
-      function startTracker(id, name) {
-        if (trackTimer) clearInterval(trackTimer);
-        const tracker = document.getElementById('tracker');
-        tracker.style.display = 'block';
-        document.getElementById('trackerName').textContent = name;
-        document.getElementById('trackerStatus').textContent = 'PENDING — en attente de démarrage…';
-
-        trackTimer = setInterval(async () => {
-          try {
-            const r = await fetch(`${API}/analyses/${id}`);
-            const data = await r.json();
-            document.getElementById('trackerStatus').textContent = `${data.status.toUpperCase()} — ${data.repo_name}`;
-            if (data.status === 'done' || data.status === 'failed') {
-              clearInterval(trackTimer);
-              tracker.style.display = 'none';
-              if (data.status === 'done') toast('✅ Terminé', `Analyse de ${name} complète`, 'success');
-              else toast('❌ Échoué', `L'analyse de ${name} a échoué`, 'danger');
-              loadHistory();
-              loadDetail(id);
-            }
-          } catch { clearInterval(trackTimer); }
-        }, 3000);
-      }
-
-      /* ── DETAIL VIEW ── */
-      async function loadDetail(id) {
-        document.getElementById('welcomeMsg').style.display = 'none';
-        document.getElementById('resultPanel').style.display = 'block';
-        curAnalysisId = id;
-
-        // Reset
-        document.getElementById('scoreVal').textContent = '…';
-        document.getElementById('resName').textContent = '…';
-        document.getElementById('riskLbl').textContent = '';
-        document.getElementById('resStatus').innerHTML = '';
-        document.getElementById('resScanType').innerHTML = '';
-        document.getElementById('resTypeTag').innerHTML = '';
-        document.getElementById('resDate').textContent = '';
-        document.getElementById('recsList').innerHTML = `<div class="empty-state"><span class="spinner-sm"></span> Chargement…</div>`;
-
-        try {
-          const r = await fetch(`${API}/analyses/${id}`);
-          const d = await r.json();
-
-          // Header
-          document.getElementById('resName').textContent = d.repo_name;
-          document.getElementById('resDate').textContent = new Date(d.created_at).toLocaleString('fr-FR');
-          document.getElementById('resStatus').innerHTML = statusBadge(d.status);
-          document.getElementById('resScanType').innerHTML = d.scan_type === 'deep'
-            ? `<span class="badge badge-deep"><i class="bi bi-microscope me-1"></i>DEEP SCAN</span>`
-            : `<span class="badge badge-standard"><i class="bi bi-lightning-charge me-1"></i>STANDARD SCAN</span>`;
-          document.getElementById('resTypeTag').innerHTML = d.target_type === 'docker'
-            ? `<span class="badge" style="background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0"><i class="bi bi-box-seam me-1"></i>Docker</span>`
-            : `<span class="badge" style="background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe"><i class="bi bi-github me-1"></i>GitHub</span>`;
-
-          // Score
-          const sc = d.status === 'done' && d.security_score !== null ? Math.round(d.security_score) : null;
-          const ring = document.getElementById('scoreRing');
-          if (sc !== null) {
-            document.getElementById('scoreVal').textContent = sc;
-            const col = sc >= 80 ? 'var(--success)' : sc >= 50 ? 'var(--warning)' : 'var(--danger)';
-            ring.style.borderColor = col; ring.style.color = col;
-            const labels = { L: [80, '🟢 RISQUE FAIBLE'], M: [50, '🟡 RISQUE MODÉRÉ'], H: [30, '🟠 RISQUE ÉLEVÉ'], C: [-1, '🔴 CRITIQUE'] };
-            let lbl = '🔴 CRITIQUE';
-            if (sc >= 80) lbl = '🟢 RISQUE FAIBLE';
-            else if (sc >= 50) lbl = '🟡 RISQUE MODÉRÉ';
-            else if (sc >= 30) lbl = '🟠 RISQUE ÉLEVÉ';
-            document.getElementById('riskLbl').textContent = lbl;
-            document.getElementById('riskLbl').style.color = col;
-          } else {
-            document.getElementById('scoreVal').textContent = '—';
-            ring.style.borderColor = 'var(--border)'; ring.style.color = 'var(--muted)';
-            document.getElementById('riskLbl').textContent = d.status === 'failed' ? '❌ ÉCHOUÉ' : '⏳ EN COURS';
+          if (prog.total_deps > 0 && (!prevProgress || prog.total_deps !== prevProgress.total_deps)) {
+            await loadDetailPartial(id);
           }
+          prevProgress = prog;
 
-          // Matrix
-          buildMatrix(d.dependencies, d.docker_result);
+          if (prog.status === 'done' || prog.status === 'failed') {
+            clearInterval(trackTimer);
+            tracker.style.display = 'none';
+            if (prog.status === 'done') {
+              toast('✅ Terminé', `Analyse de ${name} complète — Score: ${Math.round(prog.security_score || 0)}/100`, 'success');
+              await loadDetail(id);
+            } else {
+              toast('❌ Échoué', `L'analyse de ${name} a échoué`, 'danger');
+              await loadDetail(id);
+            }
+            loadHistory();
+          }
+        } catch (e) {
+          console.error('Tracker error:', e);
+        }
+      }, 3500);
+    }
 
-          // RECS
-          const recs = d.recommendations || [];
-          document.getElementById('cntRecs').textContent = recs.length;
-          document.getElementById('recsList').innerHTML = recs.length
-            ? recs.map(r => `
-            <div class="rec-card">
-              <div class="rec-type rec-type-${r.target_type}">
-                <i class="bi bi-${r.target_type === 'docker' ? 'box-seam' : r.target_type === 'dependency' ? 'package' : 'globe'} me-1"></i>
-                ${r.target_type.toUpperCase()}
-                ${r.provider ? `<span style="opacity:.6;font-weight:400;margin-left:.25rem">— ${r.provider}</span>` : ''}
-              </div>
-              <div class="rec-text">${r.recommendation_text}</div>
-            </div>`).join('')
-            : `<div class="empty-state"><i class="bi bi-check-circle" style="color:var(--success)"></i>${d.status === 'done' ? 'Aucune recommandation générée.' : 'Analyse non terminée.'}</div>`;
+    /* Chargement partiel (pendant RUNNING) */
+    async function loadDetailPartial(id) {
+      try {
+        const r = await fetch(`${API}/analyses/${id}`);
+        const d = await r.json();
 
-          // VULNS
-          let allVulns = [];
-          (d.dependencies || []).forEach(dep => (dep.vulnerabilities || []).forEach(v => allVulns.push({ ...v, pkg: dep.name })));
-          document.getElementById('cntVulns').textContent = allVulns.length;
-          document.getElementById('vulnsTbody').innerHTML = allVulns.length
-            ? allVulns.map(v => `<tr>
-            <td><code>${v.cve_id}</code></td>
-            <td style="font-weight:600">${v.pkg}</td>
-            <td>${sevBadge(v.severity)}</td>
-            <td style="font-weight:700">${(v.cvss_score || 0).toFixed(1)}</td>
-            <td>${v.fixed_version ? `<span style="color:var(--success)"><i class="bi bi-check-circle"></i> ${v.fixed_version}</span>` : '<span style="color:var(--muted)">—</span>'}</td>
-            <td>${v.exploit_available ? '<span class="badge badge-failed"><i class="bi bi-exclamation-triangle"></i> Oui</span>' : '<span class="badge badge-done">Non</span>'}</td>
-          </tr>`).join('')
-            : `<tr><td colspan="6" class="empty-state"><i class="bi bi-shield-check" style="color:var(--success)"></i>Aucune CVE détectée</td></tr>`;
+        document.getElementById('resName').textContent = d.repo_name;
+        document.getElementById('resStatus').innerHTML = statusBadge(d.status);
+        document.getElementById('resScanType').innerHTML = d.scan_type === 'deep'
+          ? `<span class="badge badge-deep"><i class="bi bi-microscope me-1"></i>DEEP SCAN</span>`
+          : `<span class="badge badge-standard"><i class="bi bi-lightning-charge me-1"></i>STANDARD SCAN</span>`;
+        document.getElementById('resTypeTag').innerHTML = d.target_type === 'docker'
+          ? `<span class="badge" style="background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0"><i class="bi bi-box-seam me-1"></i>Docker</span>`
+          : `<span class="badge" style="background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe"><i class="bi bi-github me-1"></i>GitHub</span>`;
+        document.getElementById('resDate').textContent = new Date(d.created_at).toLocaleString('fr-FR');
 
-          // DEPS
-          const deps = d.dependencies || [];
-          document.getElementById('cntDeps').textContent = deps.length;
-          document.getElementById('depsTabBtn').style.display = d.target_type === 'docker' ? 'none' : '';
-          document.getElementById('depsTbody').innerHTML = deps.length
-            ? deps.map(dep => `<tr>
+        // Metadonnées CVE version + troncature
+        updateMetaBar(d);
+
+        const ring = document.getElementById('scoreRing');
+        ring.style.borderColor = 'var(--warning)';
+        ring.style.color = 'var(--warning)';
+        document.getElementById('scoreVal').textContent = '⏳';
+        document.getElementById('riskLbl').textContent = 'Analyse en cours...';
+
+        const deps = d.dependencies || [];
+        document.getElementById('cntDeps').textContent = deps.length;
+        renderDepsTable(deps, 'depsTbody', true);
+
+        let allVulns = [];
+        deps.forEach(dep => (dep.vulnerabilities || []).forEach(v => allVulns.push({ ...v, pkg: dep.name })));
+        document.getElementById('cntVulns').textContent = allVulns.length;
+        if (allVulns.length > 0) {
+          allVulnsData = allVulns;
+          renderVulnsTable(allVulns, 'vulnsTbody', true);
+        }
+        buildMatrix(deps, d.docker_result);
+      } catch (e) {
+        console.warn('loadDetailPartial error:', e);
+      }
+    }
+
+    /* ── Mettre à jour la barre de métadonnées (version moteur CVE + troncature) ── */
+    function updateMetaBar(d) {
+      // Version du moteur CVE
+      if (d.cve_service_version) {
+        document.getElementById('metaMoteur').style.display = '';
+        document.getElementById('resCVEVersion').textContent = `Moteur CVE v${d.cve_service_version}`;
+      } else {
+        document.getElementById('metaMoteur').style.display = 'none';
+      }
+
+      // Troncature
+      if (d.dependencies_truncated) {
+        document.getElementById('metaTruncation').style.display = '';
+        document.getElementById('resTruncation').textContent =
+          `Scan partiel : ${d.dependencies_scanned_count}/${d.dependencies_total_count} dépendances analysées`;
+
+        // Bannière dans l'onglet Dépendances
+        document.getElementById('depsTruncationBanner').style.display = 'block';
+        document.getElementById('depsTruncationBanner').innerHTML = `
+          <div class="alert-truncation">
+            <i class="bi bi-exclamation-triangle-fill" style="color:var(--warning);font-size:1rem"></i>
+            <div>
+              <strong>Scan partiel</strong> — Ce dépôt contient <strong>${d.dependencies_total_count}</strong> dépendances.
+              Seules les <strong>${d.dependencies_scanned_count}</strong> premières ont été analysées pour éviter les timeouts.
+              Utilisez le mode <strong>Deep</strong> pour une analyse complète.
+            </div>
+          </div>`;
+      } else {
+        document.getElementById('metaTruncation').style.display = 'none';
+        document.getElementById('depsTruncationBanner').style.display = 'none';
+      }
+    }
+
+    /* ── Filtrage des vulnérabilités ── */
+    function filterVulns(sev) {
+      vulnFilter = sev;
+      const filtered = sev === 'ALL' ? allVulnsData : allVulnsData.filter(v => (v.severity || '').toUpperCase() === sev);
+      renderVulnsTable(filtered, 'vulnsTbody', false);
+      document.getElementById('vulnFilterInfo').textContent = sev === 'ALL'
+        ? `${allVulnsData.length} vulnérabilités`
+        : `${filtered.length} / ${allVulnsData.length} — filtre: ${sev}`;
+    }
+
+    /* ── Rendu table vulnérabilités ── */
+    function renderVulnsTable(vulns, tbodyId, animated) {
+      const anim = animated ? 'style="animation:fadeIn .4s"' : '';
+      document.getElementById(tbodyId).innerHTML = vulns.length
+        ? vulns.map(v => {
+            const cveUrl = v.cve_id.startsWith('CVE-')
+              ? `https://nvd.nist.gov/vuln/detail/${v.cve_id}`
+              : `https://osv.dev/vulnerability/${v.cve_id}`;
+            const exploitBadge = v.exploit_available
+              ? `<span class="badge badge-exploit"><i class="bi bi-exclamation-triangle"></i> ACTIF</span>`
+              : `<span class="badge badge-done">Non</span>`;
+            const desc = (v.description || '').substring(0, 80) + ((v.description || '').length > 80 ? '…' : '');
+            return `<tr ${anim}>
+              <td><a href="${cveUrl}" target="_blank" class="cve-link">${v.cve_id}</a></td>
+              <td style="font-weight:600">${v.pkg}</td>
+              <td>${sevBadge(v.severity)}</td>
+              <td style="font-weight:700;font-family:monospace">${(v.cvss_score || 0).toFixed(1)}</td>
+              <td>${v.fixed_version ? `<span style="color:var(--success)"><i class="bi bi-check-circle"></i> ${v.fixed_version}</span>` : '<span style="color:var(--muted)">—</span>'}</td>
+              <td>${exploitBadge}</td>
+              <td class="desc-cell" title="${(v.description || '').replace(/"/g, '&quot;')}">${desc || '<span style="color:var(--muted)">N/A</span>'}</td>
+            </tr>`;
+          }).join('')
+        : `<tr><td colspan="7" class="empty-state"><i class="bi bi-shield-check" style="color:var(--success)"></i>Aucune CVE dans ce filtre</td></tr>`;
+    }
+
+    /* ── Rendu table dépendances ── */
+    function renderDepsTable(deps, tbodyId, animated) {
+      const anim = animated ? 'style="animation:fadeIn .4s"' : '';
+      document.getElementById(tbodyId).innerHTML = deps.length
+        ? deps.map(dep => `<tr ${anim}>
             <td style="font-weight:600">${dep.name}</td>
             <td><code>${dep.version}</code></td>
             <td><span class="badge badge-pending">${dep.ecosystem}</span></td>
             <td>${(dep.vulnerabilities || []).length
-                ? `<span class="badge badge-failed"><i class="bi bi-bug"></i> ${dep.vulnerabilities.length} CVE</span>`
-                : `<span class="badge badge-done"><i class="bi bi-check-circle"></i> Safe</span>`}</td>
+              ? `<span class="badge badge-failed"><i class="bi bi-bug"></i> ${dep.vulnerabilities.length} CVE</span>`
+              : `<span class="badge badge-done"><i class="bi bi-check-circle"></i> Safe</span>`}</td>
             <td>${dep.is_outdated ? '<span class="badge badge-failed">Oui</span>' : '<span class="badge badge-done">Non</span>'}</td>
           </tr>`).join('')
-            : `<tr><td colspan="5" class="empty-state">Aucune dépendance détectée</td></tr>`;
+        : `<tr><td colspan="5" class="empty-state">Aucune dépendance détectée</td></tr>`;
+    }
 
-          // DOCKER RESULT
-          const dr = d.docker_result;
-          document.getElementById('dockerTabBtn').style.display = dr ? '' : 'none';
-          if (dr) {
-            document.getElementById('dockerResContent').innerHTML = `
+    /* ── DETAIL VIEW (chargement complet) ── */
+    async function loadDetail(id) {
+      document.getElementById('welcomeMsg').style.display = 'none';
+      document.getElementById('resultPanel').style.display = 'block';
+      curAnalysisId = id;
+
+      document.getElementById('scoreVal').textContent = '…';
+      document.getElementById('resName').textContent = '…';
+      document.getElementById('riskLbl').textContent = '';
+      document.getElementById('resStatus').innerHTML = '';
+      document.getElementById('resScanType').innerHTML = '';
+      document.getElementById('resTypeTag').innerHTML = '';
+      document.getElementById('resDate').textContent = '';
+      document.getElementById('recsList').innerHTML = `<div class="empty-state"><span class="spinner-sm"></span> Chargement…</div>`;
+      document.getElementById('btnPDF').style.display = 'none';
+
+      try {
+        const r = await fetch(`${API}/analyses/${id}`);
+        const d = await r.json();
+
+        // Header
+        document.getElementById('resName').textContent = d.repo_name;
+        document.getElementById('resDate').textContent = new Date(d.created_at).toLocaleString('fr-FR');
+        document.getElementById('resStatus').innerHTML = statusBadge(d.status);
+        document.getElementById('resScanType').innerHTML = d.scan_type === 'deep'
+          ? `<span class="badge badge-deep"><i class="bi bi-microscope me-1"></i>DEEP SCAN</span>`
+          : `<span class="badge badge-standard"><i class="bi bi-lightning-charge me-1"></i>STANDARD SCAN</span>`;
+        document.getElementById('resTypeTag').innerHTML = d.target_type === 'docker'
+          ? `<span class="badge" style="background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0"><i class="bi bi-box-seam me-1"></i>Docker</span>`
+          : `<span class="badge" style="background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe"><i class="bi bi-github me-1"></i>GitHub</span>`;
+
+        // Metadonnées (version moteur + troncature)
+        updateMetaBar(d);
+
+        // Bouton PDF (si analyse terminée)
+        if (d.status === 'done') {
+          const pdfBtn = document.getElementById('btnPDF');
+          pdfBtn.style.display = 'flex';
+          pdfBtn.href = `${API}/analyses/${id}/report`;
+        }
+
+        // Score
+        const sc = d.status === 'done' && d.security_score !== null ? Math.round(d.security_score) : null;
+        const ring = document.getElementById('scoreRing');
+        if (sc !== null) {
+          document.getElementById('scoreVal').textContent = sc;
+          const col = sc >= 80 ? 'var(--success)' : sc >= 50 ? 'var(--warning)' : 'var(--danger)';
+          ring.style.borderColor = col; ring.style.color = col;
+          let lbl = '🔴 CRITIQUE';
+          if (sc >= 90) lbl = '✅ EXCELLENT';
+          else if (sc >= 70) lbl = '🟢 BON';
+          else if (sc >= 50) lbl = '🟡 MOYEN';
+          else if (sc >= 30) lbl = '🟠 MAUVAIS';
+          document.getElementById('riskLbl').textContent = lbl;
+          document.getElementById('riskLbl').style.color = col;
+        } else {
+          document.getElementById('scoreVal').textContent = '—';
+          ring.style.borderColor = 'var(--border)'; ring.style.color = 'var(--muted)';
+          document.getElementById('riskLbl').textContent = d.status === 'failed' ? '❌ ÉCHOUÉ' : '⏳ EN COURS';
+        }
+
+        // Matrix
+        buildMatrix(d.dependencies, d.docker_result);
+
+        // RECS — avec effet typewriter
+        const recs = d.recommendations || [];
+        document.getElementById('cntRecs').textContent = recs.length;
+        if (recs.length > 0) {
+          document.getElementById('recsList').innerHTML = '';
+          for (let i = 0; i < recs.length; i++) {
+            const rec = recs[i];
+            const card = document.createElement('div');
+            card.className = 'rec-card';
+            card.style.animation = `fadeIn .5s ease ${i * 0.15}s both`;
+            const iconMap = { docker: 'box-seam', dependency: 'package', global: 'globe' };
+            const icon = iconMap[rec.target_type] || 'lightbulb';
+            card.innerHTML = `
+              <div class="rec-type rec-type-${rec.target_type}">
+                <i class="bi bi-${icon} me-1"></i>
+                ${rec.target_type.toUpperCase()}
+                ${rec.provider ? `<span style="opacity:.6;font-weight:400;margin-left:.25rem">— ${rec.provider}</span>` : ''}
+              </div>
+              <div class="rec-text" id="rec-text-${i}"></div>`;
+            document.getElementById('recsList').appendChild(card);
+            // Typewriter pour les recommandations IA
+            await typewriterEffect(`rec-text-${i}`, rec.recommendation_text, 6);
+          }
+        } else {
+          document.getElementById('recsList').innerHTML =
+            `<div class="empty-state"><i class="bi bi-check-circle" style="color:var(--success)"></i>${
+              d.status === 'done' ? 'Aucune recommandation générée.' : 'Analyse non terminée.'}</div>`;
+        }
+
+        // VULNS — tri CVSS décroissant
+        let vulns = [];
+        (d.dependencies || []).forEach(dep => (dep.vulnerabilities || []).forEach(v => vulns.push({ ...v, pkg: dep.name })));
+        vulns.sort((a, b) => (b.cvss_score || 0) - (a.cvss_score || 0));
+        allVulnsData = vulns;
+        vulnFilter = 'ALL';
+        document.getElementById('cntVulns').textContent = vulns.length;
+        document.getElementById('vulnFilterInfo').textContent = `${vulns.length} vulnérabilités`;
+        renderVulnsTable(vulns, 'vulnsTbody', false);
+
+        // DEPS
+        const deps = d.dependencies || [];
+        document.getElementById('cntDeps').textContent = deps.length;
+        document.getElementById('depsTabBtn').style.display = d.target_type === 'docker' ? 'none' : '';
+        renderDepsTable(deps, 'depsTbody', false);
+
+        // DOCKER
+        const dr = d.docker_result;
+        document.getElementById('dockerTabBtn').style.display = dr ? '' : 'none';
+        if (dr) {
+          document.getElementById('dockerResContent').innerHTML = `
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1rem;padding:.5rem 0">
             <div class="card" style="margin:0;padding:1rem;text-align:center">
               <div style="font-size:.75rem;color:var(--muted);font-weight:700;text-transform:uppercase;margin-bottom:.5rem">Image</div>
-              <div style="font-weight:700;font-size:.95rem">${dr.base_image}</div>
+              <div style="font-weight:700;font-size:.95rem;word-break:break-all">${dr.base_image}</div>
             </div>
             <div class="card" style="margin:0;padding:1rem;text-align:center">
               <div style="font-size:.75rem;color:var(--muted);font-weight:700;text-transform:uppercase;margin-bottom:.5rem">Score Image</div>
@@ -1183,57 +1053,113 @@
               <div style="font-size:.75rem;color:var(--muted);font-weight:700;text-transform:uppercase;margin-bottom:.5rem">Utilisateur Root</div>
               <div style="font-weight:700;color:${dr.has_root_user ? 'var(--danger)' : 'var(--success)'}">${dr.has_root_user ? '⚠️ Oui (risque élevé)' : '✅ Non'}</div>
             </div>
+          </div>
+          <div style="margin-top:1rem;padding:.75rem;background:#fef3c7;border-radius:8px;border:1px solid #fde68a;font-size:.8rem">
+            <i class="bi bi-lightbulb me-1" style="color:#d97706"></i>
+            <strong>Score image Docker</strong> : ${dr.image_score >= 70 ? 'Bonne sécurité de l\'image.' :
+              dr.image_score >= 40 ? 'Image vulnérable — mise à jour recommandée.' :
+              'Image très vulnérable — changer d\'image de base (utiliser une version slim/alpine).'}
+            ${dr.has_root_user ? ' L\'image s\'exécute en root — ajoutez <code>USER nonroot</code> dans votre Dockerfile.' : ''}
           </div>`;
-          }
+        }
 
-        } catch (e) {
-          toast('Erreur', 'Impossible de charger les détails : ' + e.message, 'danger');
+      } catch (e) {
+        toast('Erreur', 'Impossible de charger les détails : ' + e.message, 'danger');
+      }
+    }
+
+    /* ── TYPEWRITER EFFECT pour les recommandations IA ── */
+    function typewriterEffect(elementId, text, speed = 6) {
+      return new Promise(resolve => {
+        const el = document.getElementById(elementId);
+        if (!el) { resolve(); return; }
+        let i = 0;
+        el.textContent = '';
+        const timer = setInterval(() => {
+          if (i < text.length) {
+            el.textContent += text[i++];
+            // Auto-scroll si visible
+          } else {
+            clearInterval(timer);
+            resolve();
+          }
+        }, speed);
+      });
+    }
+
+    /* ── KEYFRAME fadeIn ── */
+    const styleSheet = document.createElement('style');
+    styleSheet.textContent = `
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(6px); }
+        to   { opacity: 1; transform: none; }
+      }
+    `;
+    document.head.appendChild(styleSheet);
+
+    /* ── MATRIX ── */
+    function buildMatrix(deps, dockerResult) {
+      const grid = {
+        4: { 1: 0, 2: 0, 3: 0, 4: 0 },
+        3: { 1: 0, 2: 0, 3: 0, 4: 0 },
+        2: { 1: 0, 2: 0, 3: 0, 4: 0 },
+        1: { 1: 0, 2: 0, 3: 0, 4: 0 }
+      };
+
+      (deps || []).forEach(d => (d.vulnerabilities || []).forEach(v => {
+        const s = (v.severity || '').toUpperCase();
+        const cvss = v.cvss_score || 0;
+
+        let row = 1;
+        if (s === 'CRITICAL') row = 4;
+        else if (s === 'HIGH') row = 3;
+        else if (s === 'MEDIUM') row = 2;
+
+        let col = 1;
+        if (cvss >= 9.0) col = 4;
+        else if (cvss >= 7.0) col = 3;
+        else if (cvss >= 4.0) col = 2;
+        if (cvss === 0) col = row;
+
+        grid[row][col]++;
+      }));
+
+      if (dockerResult?.vulnerabilities_count > 0 && !deps?.length) {
+        grid[4][4] += Math.floor(dockerResult.vulnerabilities_count * 0.05);
+      }
+
+      for (let r = 1; r <= 4; r++) {
+        for (let c = 1; c <= 4; c++) {
+          const id = `m${r}${c}`;
+          const el = document.getElementById(id);
+          if (el) {
+            el.textContent = grid[r][c] || '0';
+            let level = 'empty';
+            if (grid[r][c] > 0) {
+              const sum = r + c;
+              if (sum >= 7) level = 'C';
+              else if (sum >= 5) level = 'H';
+              else if (sum >= 3) level = 'M';
+              else level = 'L';
+            }
+            el.className = `mc mc-${level}`;
+          }
         }
       }
+    }
 
-      /* ── MATRIX ── */
-      function buildMatrix(deps, dockerResult) {
-        let crit = 0, high = 0, med = 0;
-        (deps || []).forEach(d => (d.vulnerabilities || []).forEach(v => {
-          const s = (v.severity || '').toUpperCase();
-          if (s === 'CRITICAL') crit++;
-          else if (s === 'HIGH') high++;
-          else if (s === 'MEDIUM') med++;
-        }));
-        if (dockerResult?.vulnerabilities_count > 0) crit += Math.floor(dockerResult.vulnerabilities_count * 0.05);
+    /* ── DETAIL TABS ── */
+    function showDetailTab(name) {
+      document.querySelectorAll('.detail-tab').forEach((b, i) => {
+        const tabs = ['recs', 'vulns', 'deps', 'dockerRes'];
+        b.classList.toggle('active', tabs[i] === name);
+      });
+      document.querySelectorAll('.detail-pane').forEach(p => p.classList.toggle('active', p.id === `pane-${name}`));
+    }
 
-        // Reset
-        ['m33', 'm32', 'm31', 'm23', 'm22', 'm21', 'm13', 'm12', 'm11'].forEach(id => {
-          const el = document.getElementById(id);
-          el.textContent = '0';
-          el.className = 'mc mc-empty';
-        });
+    // Init
+    checkHealth();
+  </script>
+</body>
 
-        if (crit > 5) { setMC('m31', crit, 'C'); }
-        else if (crit > 0) { setMC('m32', crit, 'H'); }
-        if (high > 10) { setMC('m21', high, 'H'); }
-        else if (high > 0) { setMC('m22', high, 'M'); }
-        if (med > 0) { setMC('m13', med, 'L'); }
-      }
-
-      function setMC(id, val, level) {
-        const el = document.getElementById(id);
-        el.textContent = val;
-        el.className = `mc mc-${level}`;
-      }
-
-      /* ── DETAIL TABS ── */
-      function showDetailTab(name) {
-        document.querySelectorAll('.detail-tab').forEach((b, i) => {
-          const tabs = ['recs', 'vulns', 'deps', 'dockerRes'];
-          b.classList.toggle('active', tabs[i] === name);
-        });
-        document.querySelectorAll('.detail-pane').forEach(p => p.classList.toggle('active', p.id === `pane-${name}`));
-      }
-
-      // Init
-      checkHealth();
-    </script>
-  </body>
-
-  </html>
+</html>

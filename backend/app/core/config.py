@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     # --- GitHub ---
     CLONE_DIRECTORY: str = "./temp_repositories"
     ENABLE_PRIVATE_REPOS: bool = False
+    GITHUB_TOKEN: str = ""  # Optionnel : augmente les limites GitHub (60 → 5000 req/h)
 
     # --- Outils de sécurité ---
     TRIVY_PATH: str = "trivy"

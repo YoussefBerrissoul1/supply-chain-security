@@ -32,8 +32,12 @@ logger = logging.getLogger(__name__)
 # ==============================================================
 
 # Timeout maximum pour le clonage (en secondes)
-# Au-delà, on considère que le repo est trop gros
-CLONE_TIMEOUT_SECONDS: int = 120
+CLONE_TIMEOUT_SECONDS: int = 180
+
+# Limites pour les grands dépôts (ex: vulhub avec des centaines de sous-dossiers)
+# On préfère les fichiers à la racine (profondeur minimale) — 1 niveau = central
+MAX_FILES_PER_ECOSYSTEM: int = 5   # Max fichiers par écosystème (python, nodejs...)
+MAX_TOTAL_DEP_FILES: int = 20      # Max total de fichiers de dépendances
 
 # Pattern regex pour valider une URL GitHub
 # Accepte : https://github.com/user/repo ou https://github.com/user/repo.git
@@ -217,16 +221,24 @@ def clone_repository(repo_url: str) -> Path:
     logger.info("Clonage de %s vers %s ...", repo_url, clone_path)
     start_time = time.time()
 
+    # Injecter le token GitHub si disponible (augmente les limites de débit et l'accès)
+    clone_url = repo_url
+    if settings.GITHUB_TOKEN:
+        # Format : https://TOKEN@github.com/user/repo
+        clone_url = repo_url.replace("https://", f"https://{settings.GITHUB_TOKEN}@")
+
     try:
         Repo.clone_from(
-            url=repo_url,
+            url=clone_url,
             to_path=str(clone_path),
-            depth=1,  # Clone superficiel = dernier commit seulement (rapide)
+            depth=1,          # Clone superficiel = dernier commit seulement (rapide)
+            single_branch=True,  # Ne cloner que la branche par défaut
             env={
                 # Timeout Git : coupe la connexion si trop long
                 "GIT_HTTP_LOW_SPEED_LIMIT": "1000",       # Minimum 1 Ko/s
-                "GIT_HTTP_LOW_SPEED_TIME": "30",           # Pendant 30 secondes max
+                "GIT_HTTP_LOW_SPEED_TIME": "60",           # Pendant 60 secondes max
             },
+            multi_options=["--filter=blob:none"]
         )
 
         # Calculer le temps de clonage
@@ -318,6 +330,7 @@ def detect_dependency_files(repo_path: Path) -> dict[str, list[str]]:
         )
 
     found_files: dict[str, list[str]] = {}
+    total_files_found = 0
 
     # --- Parcours récursif de tous les fichiers ---
     try:
@@ -330,23 +343,60 @@ def detect_dependency_files(repo_path: Path) -> dict[str, list[str]]:
 
     logger.info("Scan de %d fichiers dans %s", len(all_files_in_repo), repo_path.name)
 
+    # Construire un index par nom de fichier pour accélérer la recherche
+    # Structure : { "requirements.txt" : [Path1, Path2, ...] }
+    file_index: dict[str, list[Path]] = {}
+    for f in all_files_in_repo:
+        name = f.name
+        if name not in file_index:
+            file_index[name] = []
+        file_index[name].append(f)
+
     # --- Pour chaque écosystème, chercher les fichiers connus ---
     for ecosystem, filenames in DEPENDENCY_FILES.items():
-        for file_in_repo in all_files_in_repo:
-            if file_in_repo.name in filenames:
-                if ecosystem not in found_files:
-                    found_files[ecosystem] = []
+        # Arrêter si la limite globale est atteinte
+        if total_files_found >= MAX_TOTAL_DEP_FILES:
+            logger.warning(
+                "Limite globale de %d fichiers atteinte — arrêt de la détection (repo trop grand)",
+                MAX_TOTAL_DEP_FILES,
+            )
+            break
 
-                relative_path = str(file_in_repo.relative_to(repo_path))
-                found_files[ecosystem].append(relative_path)
+        ecosystem_files: list[str] = []
 
-                logger.info("Fichier trouvé : [%s] %s", ecosystem, relative_path)
+        for filename in filenames:
+            matching = file_index.get(filename, [])
+            for file_path in matching:
+                relative_path = str(file_path.relative_to(repo_path))
+                ecosystem_files.append(relative_path)
+
+        if not ecosystem_files:
+            continue
+
+        # Trier par profondeur (priorité aux fichiers proches de la racine)
+        # Un fichier à la racine (depth=0) est plus central qu'un sous-dossier
+        ecosystem_files.sort(key=lambda p: p.replace('\\', '/').count('/'))
+
+        # Limiter au max par écosystème
+        if len(ecosystem_files) > MAX_FILES_PER_ECOSYSTEM:
+            logger.warning(
+                "[%s] %d fichiers trouvés — limité aux %d plus proches de la racine "
+                "(dépôt multi-projet détecté, ex: vulhub, monorepo)",
+                ecosystem, len(ecosystem_files), MAX_FILES_PER_ECOSYSTEM,
+            )
+            ecosystem_files = ecosystem_files[:MAX_FILES_PER_ECOSYSTEM]
+
+        found_files[ecosystem] = ecosystem_files
+        total_files_found += len(ecosystem_files)
+
+        for fp in ecosystem_files:
+            logger.info("Fichier retenu : [%s] %s", ecosystem, fp)
 
     # --- Log résumé ---
     if found_files:
         total = sum(len(files) for files in found_files.values())
         logger.info(
-            "Détection terminée : %d fichiers dans %d écosystèmes",
+            "Détection terminée : %d fichiers retenus dans %d écosystèmes",
             total, len(found_files),
         )
     else:

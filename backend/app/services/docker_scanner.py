@@ -30,13 +30,23 @@ import json
 import logging
 import re
 import subprocess
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from app.core.config import settings
-from app.services.cve_service import VulnerabilityResult, Severity
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------
+# VERROU GLOBAL TRIVY
+# ---------------------------------------------------------------
+# Trivy ne supporte pas deux scans simultanés sur le même cache.
+# Ce Lock() garantit qu'un seul scan Trivy tourne à la fois.
+# Si un 2ème scan est lancé pendant qu'un 1er tourne, il attend
+# (bloque) jusqu'à ce que le 1er libère le verrou.
+# C'est la solution la plus simple sans Redis/Celery (PFE).
+_trivy_lock = threading.Lock()
 
 
 # ==============================================================
@@ -44,8 +54,8 @@ logger = logging.getLogger(__name__)
 # ==============================================================
 
 # Timeout maximum pour un scan Trivy (en secondes)
-# Les grosses images comme "ubuntu:latest" peuvent prendre du temps
-TRIVY_TIMEOUT_SECONDS: int = 120
+# Les grosses images comme "ubuntu:latest" ou "metasploitable2" peuvent prendre du temps
+TRIVY_TIMEOUT_SECONDS: int = 600
 
 # Images de base considérées comme "bonnes pratiques" (minimalistes)
 # Elles reçoivent un bonus dans le scoring
@@ -68,6 +78,18 @@ TRIVY_SEVERITY_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"]
 # ==============================================================
 
 @dataclass
+class TrivyVulnerability:
+    cve_id: str
+    pkg_name: str
+    installed_version: str
+    fixed_version: str | None
+    severity: str
+    description: str
+    cvss_score: float
+    published_date: str | None
+
+
+@dataclass
 class DockerScanResult:
     """
     Résultat complet du scan Docker pour un dépôt.
@@ -88,6 +110,7 @@ class DockerScanResult:
     image_score: float = 100.0
     trivy_available: bool = False
     vulnerabilities_by_severity: dict[str, int] = field(default_factory=dict)
+    detailed_vulnerabilities: list[TrivyVulnerability] = field(default_factory=list)
     raw_trivy_output: dict = field(default_factory=dict)
     dockerfile_issues: list[str] = field(default_factory=list)
 
@@ -282,7 +305,7 @@ def is_trivy_available() -> bool:
 # ÉTAPE 3 : LANCER TRIVY SUR L'IMAGE DE BASE
 # ==============================================================
 
-def run_trivy_scan(image_name: str) -> dict | None:
+def run_trivy_scan(image_name: str, scan_type: str = "standard") -> dict | None:
     """
     Lance Trivy pour scanner une image Docker et retourne le rapport JSON.
 
@@ -291,212 +314,184 @@ def run_trivy_scan(image_name: str) -> dict | None:
 
     Options importantes :
         --format json   : sortie parseable par Python
-        --quiet         : pas de barre de progression (pour les logs propres)
+        --quiet         : pas de logs Trivy dans notre log
         --timeout 120s  : stop si trop long
-        --no-progress   : pas d'animation dans les logs
+        --no-progress   : pas d'animation de progression
 
     Paramètres :
-        image_name : nom complet de l'image (ex: "python:3.12-slim", "node:18-alpine")
+        image_name : nom complet de l'image (ex: "python:3.12-slim")
+        scan_type  : "standard" (rapide, OS uniquement) ou "deep" (secrets, misconfig, license)
 
     Retourne :
         dict : rapport JSON de Trivy, ou None en cas d'échec
     """
 
-    logger.info("Lancement de Trivy sur l'image : %s", image_name)
+    logger.info("Lancement de Trivy sur l'image : %s (scan_type=%s)", image_name, scan_type)
+
+    # "standard" = vulns OS uniquement (rapide)
+    # "deep"     = vulns + secrets + misconfigs (plus long)
+    scanners = "vuln" if scan_type == "standard" else "vuln,secret,misconfig"
 
     trivy_command = [
         settings.TRIVY_PATH,
         "image",
-        "--format", "json",      # Sortie JSON pour parsing Python
-        "--quiet",               # Pas de logs Trivy dans notre log
+        "--format", "json",
+        "--quiet",
         "--timeout", f"{TRIVY_TIMEOUT_SECONDS}s",
-        "--no-progress",         # Pas d'animation de progression
+        "--no-progress",
+        "--skip-version-check",   # Évite les messages de mise à jour qui polluent le stdout JSON
+        # Ces fichiers apt sont des listes de paquets disponibles, pas des paquets installés.
+        # Ils sont très gros (10-20 Mo) et Trivy les scanne inutilement pour des secrets.
+        # Les vraies CVE sont détectées via les paquets système, pas ces fichiers de liste.
+        "--skip-files", "/var/lib/apt/lists/*",
+        "--skip-files", "/var/cache/apt/*",
+        "--scanners", scanners,
         image_name,
     ]
 
-    try:
-        process = subprocess.run(
-            trivy_command,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=TRIVY_TIMEOUT_SECONDS + 10,  # Léger dépassement toléré
-        )
+    # --- Acquérir le verrou : un seul scan Trivy à la fois ---
+    # Si un autre scan tourne déjà, on attend ici (pas de crash).
+    # Dès que le premier scan termine, le verrou est libéré et on continue.
+    logger.info("Trivy : attente du verrou (évite les conflits de cache)...")
+    with _trivy_lock:
+        logger.info("Trivy : verrou acquis — démarrage du scan de '%s'", image_name)
+        try:
+            process = subprocess.run(
+                trivy_command,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=TRIVY_TIMEOUT_SECONDS + 30,  # Marge supplémentaire pour les grosses images
+            )
 
-        if process.returncode != 0:
-            # Trivy retourne un code non-nul si des vulnérabilités sont trouvées
-            # C'est normal — on parse quand même la sortie
-            if process.returncode == 1 and process.stdout:
-                # Code 1 = "des vulnérabilités ont été trouvées" → c'est attendu
-                logger.info("Trivy : vulnérabilités trouvées (code 1) — résultats disponibles")
-            else:
-                # Code > 1 = erreur réelle (image introuvable, réseau, etc.)
+            # --- Analyser le code de retour ---
+            # Code 0 : succès, aucune vulnérabilité
+            # Code 1 : succès, des vulnérabilités ont été trouvées (comportement normal)
+            # Code 2 : avertissement (OS en fin de support, ex: Ubuntu 8.04) — JSON valide quand même
+            # Code > 2 : vraie erreur (image introuvable, erreur réseau, etc.)
+            if process.returncode not in (0, 1, 2):
                 logger.error(
-                    "Trivy a échoué (code %d) pour '%s' : %s",
-                    process.returncode, image_name, process.stderr[:200],
+                    "Trivy a échoué (code %d) pour '%s'.\nSTDERR: %s",
+                    process.returncode, image_name, process.stderr[:500],
                 )
                 return None
 
-        if not process.stdout:
-            logger.warning("Trivy : sortie vide pour '%s'", image_name)
+            if process.returncode == 2:
+                logger.warning(
+                    "Trivy : code 2 pour '%s' (OS probablement en fin de support). "
+                    "On continue avec les résultats disponibles.",
+                    image_name,
+                )
+
+            if not process.stdout or process.stdout.strip() == "":
+                logger.warning("Trivy : sortie vide pour '%s'", image_name)
+                return None
+
+            # --- Parser la sortie JSON ---
+            try:
+                trivy_data = json.loads(process.stdout)
+                total_results = len(trivy_data.get("Results", []))
+                logger.info(
+                    "Trivy scan terminé pour '%s' (%d bloc(s) de résultats)",
+                    image_name, total_results,
+                )
+                return trivy_data
+
+            except json.JSONDecodeError as e:
+                # Parfois Trivy mélange des logs avec le JSON → on essaie de l'extraire
+                logger.warning("JSON invalide brut pour '%s' : %s — tentative d'extraction", image_name, e)
+                try:
+                    # Chercher le JSON en ignorant les lignes de log qui précèdent
+                    stdout_clean = process.stdout
+                    json_start = stdout_clean.find('{')
+                    if json_start != -1:
+                        trivy_data = json.loads(stdout_clean[json_start:])
+                        logger.info("JSON extrait avec succès après nettoyage pour '%s'", image_name)
+                        return trivy_data
+                except Exception:
+                    pass
+                logger.error("Impossible de parser le JSON Trivy pour '%s'", image_name)
+                return None
+
+        except subprocess.TimeoutExpired:
+            logger.error(
+                "Trivy timeout après %ds pour '%s' — augmentez TRIVY_TIMEOUT_SECONDS si nécessaire",
+                TRIVY_TIMEOUT_SECONDS, image_name,
+            )
             return None
 
-        # Parser la sortie JSON
-        try:
-            trivy_data = json.loads(process.stdout)
-            logger.info("Trivy scan terminé pour '%s'", image_name)
-            return trivy_data
-
-        except json.JSONDecodeError as e:
-            logger.error("JSON invalide retourné par Trivy pour '%s' : %s", image_name, e)
+        except FileNotFoundError:
+            logger.error(
+                "Trivy introuvable lors du scan de '%s'. "
+                "Vérifiez que Trivy est installé : https://trivy.dev",
+                image_name,
+            )
             return None
 
-    except subprocess.TimeoutExpired:
-        logger.error(
-            "Trivy a timeout après %ds pour '%s' — image trop grosse ou réseau lent",
-            TRIVY_TIMEOUT_SECONDS, image_name,
-        )
-        return None
-
-    except FileNotFoundError:
-        # Trivy n'est plus disponible entre la vérification et l'exécution
-        logger.error("Trivy introuvable lors du scan de '%s'", image_name)
-        return None
-
-    except Exception as e:
-        logger.error("Erreur inattendue Trivy pour '%s' : %s", image_name, e)
-        return None
+        except Exception as e:
+            logger.error("Erreur inattendue Trivy pour '%s' : %s", image_name, e)
+            return None
 
 
 # ==============================================================
 # ÉTAPE 4 : PARSER LE RAPPORT TRIVY
 # ==============================================================
 
-def extract_trivy_vulnerabilities(trivy_data: dict) -> list[VulnerabilityResult]:
+def parse_trivy_report(trivy_data: dict) -> tuple[dict[str, int], list[TrivyVulnerability]]:
     """
-    Extrait la liste détaillée des vulnérabilités depuis la sortie JSON de Trivy.
-
-    Paramètres :
-        trivy_data : dict retourné par run_trivy_scan()
-
-    Retourne :
-        list[VulnerabilityResult] : Liste des vulnérabilités formatées pour l'IA et la base.
+    Extrait les vulnérabilités détaillées et le nombre par sévérité depuis le rapport Trivy.
     """
-    results: list[VulnerabilityResult] = []
-
-    if not trivy_data:
-        return results
-
-    trivy_results = trivy_data.get("Results", [])
-    if not trivy_results:
-        return results
-
-    for result_block in trivy_results:
-        vulnerabilities = result_block.get("Vulnerabilities") or []
-
-        for vuln in vulnerabilities:
-            cve_id = vuln.get("VulnerabilityID", "UNKNOWN")
-            severity_str = vuln.get("Severity", "UNKNOWN").upper()
-
-            # Map Trivy Severity to our standard Severity enum
-            severity = Severity.NONE
-            if severity_str == "CRITICAL":
-                severity = Severity.CRITICAL
-            elif severity_str == "HIGH":
-                severity = Severity.HIGH
-            elif severity_str == "MEDIUM":
-                severity = Severity.MEDIUM
-            elif severity_str == "LOW":
-                severity = Severity.LOW
-
-            # Extract CVSS score (prefer NVD V3, fallback to V2 or others)
-            cvss_score = 0.0
-            cvss_data = vuln.get("CVSS", {})
-            for source, scores in cvss_data.items():
-                if isinstance(scores, dict):
-                    if "V3Score" in scores and scores["V3Score"] is not None:
-                        cvss_score = float(scores["V3Score"])
-                        break
-                    elif "V2Score" in scores and scores["V2Score"] is not None:
-                        cvss_score = float(scores["V2Score"])
-
-            description = vuln.get("Title") or vuln.get("Description", "Aucune description.")
-            fixed_version = vuln.get("FixedVersion")
-            published_date = vuln.get("PublishedDate")
-
-            # Estimate exploit available if any URL references exploit DB
-            exploit_available = False
-            references = vuln.get("References", [])
-            for ref in references:
-                ref_lower = ref.lower()
-                if "exploit" in ref_lower or "poc" in ref_lower:
-                    exploit_available = True
-                    break
-
-            res = VulnerabilityResult(
-                cve_id=cve_id,
-                cvss_score=cvss_score,
-                severity=severity,
-                description=description,
-                source="Trivy",
-                fixed_version=fixed_version,
-                exploit_available=exploit_available,
-                published_date=published_date
-            )
-            results.append(res)
-
-    return results
-
-
-def parse_trivy_report(trivy_data: dict) -> dict[str, int]:
-    """
-    Extrait le nombre de vulnérabilités par sévérité depuis le rapport Trivy.
-
-    Structure du rapport Trivy (simplifiée) :
-        {
-            "Results": [
-                {
-                    "Target": "python:3.12-slim (debian 12.1)",
-                    "Type": "debian",
-                    "Vulnerabilities": [
-                        {
-                            "VulnerabilityID": "CVE-2023-12345",
-                            "Severity": "HIGH",
-                            "Title": "Buffer overflow in libssl",
-                            ...
-                        }
-                    ]
-                }
-            ]
-        }
-
-    Paramètres :
-        trivy_data : dict retourné par run_trivy_scan()
-
-    Retourne :
-        dict : { "CRITICAL": 2, "HIGH": 5, "MEDIUM": 10, "LOW": 3, "UNKNOWN": 0 }
-    """
-    # Initialiser le compteur pour chaque sévérité
     counts: dict[str, int] = {s: 0 for s in TRIVY_SEVERITY_ORDER}
+    detailed_vulns: list[TrivyVulnerability] = []
 
     results = trivy_data.get("Results", [])
 
     if not results:
         logger.debug("Trivy : aucun résultat dans le rapport")
-        return counts
+        return counts, detailed_vulns
 
     for result_block in results:
         vulnerabilities = result_block.get("Vulnerabilities") or []
 
         for vuln in vulnerabilities:
             severity = vuln.get("Severity", "UNKNOWN").upper()
-
-            # Normaliser les sévérités inconnues
             if severity not in counts:
                 severity = "UNKNOWN"
 
             counts[severity] += 1
+            
+            # Extract detailed vulnerability data
+            cve_id = vuln.get("VulnerabilityID", "UNKNOWN")
+            pkg_name = vuln.get("PkgName", "UnknownPackage")
+            installed_version = vuln.get("InstalledVersion", "0.0.0")
+            fixed_version = vuln.get("FixedVersion", None)
+            description = vuln.get("Description", "")
+            published_date = vuln.get("PublishedDate", None)
+            
+            # Extract CVSS Score
+            cvss_score = 0.0
+            cvss_data = vuln.get("CVSS", {})
+            if cvss_data:
+                # Prefer NVD V3 score, otherwise take any V3Score
+                if "nvd" in cvss_data and "V3Score" in cvss_data["nvd"]:
+                    cvss_score = cvss_data["nvd"]["V3Score"]
+                else:
+                    for vendor_data in cvss_data.values():
+                        if isinstance(vendor_data, dict) and "V3Score" in vendor_data:
+                            cvss_score = vendor_data["V3Score"]
+                            break
+            
+            detailed_vulns.append(TrivyVulnerability(
+                cve_id=cve_id,
+                pkg_name=pkg_name,
+                installed_version=installed_version,
+                fixed_version=fixed_version,
+                severity=severity,
+                description=description,
+                cvss_score=cvss_score,
+                published_date=published_date
+            ))
 
     total = sum(counts.values())
     logger.info(
@@ -504,7 +499,7 @@ def parse_trivy_report(trivy_data: dict) -> dict[str, int]:
         total, counts["CRITICAL"], counts["HIGH"], counts["MEDIUM"], counts["LOW"],
     )
 
-    return counts
+    return counts, detailed_vulns
 
 
 # ==============================================================
@@ -588,6 +583,7 @@ def calculate_image_score(
 def scan_docker(
     repo_path: Path,
     dockerfile_paths: list[str],
+    scan_type: str = "standard"
 ) -> DockerScanResult | None:
     """
     Fonction principale du scanner Docker.
@@ -597,6 +593,7 @@ def scan_docker(
         repo_path        : chemin du dépôt cloné
         dockerfile_paths : liste des chemins relatifs vers les Dockerfiles
                            (retournés par github_analyzer)
+        scan_type        : "standard" ou "deep"
 
     Retourne :
         DockerScanResult : résultat complet du scan
@@ -607,20 +604,13 @@ def scan_docker(
     """
 
     if not dockerfile_paths:
-        logger.info("Aucun fichier Docker dans ce dépôt — scan Docker ignoré")
-        return None
-
-    # Filtrer pour ne garder que les vrais 'Dockerfile' (ignorer docker-compose.yml etc)
-    actual_dockerfiles = [p for p in dockerfile_paths if Path(p).name.lower() == "dockerfile"]
-
-    if not actual_dockerfiles:
-        logger.info("Aucun vrai Dockerfile trouvé (seulement des docker-compose etc) — scan Docker ignoré")
+        logger.info("Aucun Dockerfile dans ce dépôt — scan Docker ignoré")
         return None
 
     # On analyse le premier Dockerfile trouvé
     # (les monorepos avec plusieurs Dockerfiles sont rares dans un PFE)
-    first_dockerfile = repo_path / actual_dockerfiles[0]
-    logger.info("Analyse Docker sur : %s", actual_dockerfiles[0])
+    first_dockerfile = repo_path / dockerfile_paths[0]
+    logger.info("Analyse Docker sur : %s", dockerfile_paths[0])
 
     # --- Étape 1 : Analyse statique du Dockerfile ---
     static_analysis = analyze_dockerfile(first_dockerfile)
@@ -644,14 +634,15 @@ def scan_docker(
 
     if trivy_ok and base_image != "unknown":
         # --- Étape 3 : Lancer Trivy sur l'image de base ---
-        trivy_data = run_trivy_scan(base_image)
+        trivy_data = run_trivy_scan(base_image, scan_type=scan_type)
 
         if trivy_data:
             # --- Étape 4 : Parser le rapport Trivy ---
-            vulns_by_severity = parse_trivy_report(trivy_data)
+            vulns_by_severity, detailed_vulns = parse_trivy_report(trivy_data)
 
             scan_result.vulnerabilities_by_severity = vulns_by_severity
             scan_result.vulnerabilities_count = sum(vulns_by_severity.values())
+            scan_result.detailed_vulnerabilities = detailed_vulns
             scan_result.raw_trivy_output = trivy_data
 
             logger.info(

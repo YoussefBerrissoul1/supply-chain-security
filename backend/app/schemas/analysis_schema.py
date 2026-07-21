@@ -1,3 +1,4 @@
+
 """
 Schemas Pydantic pour la validation des requêtes et réponses API.
 Séparation claire entre Input (Request) et Output (Response).
@@ -45,6 +46,9 @@ class VulnerabilityResponse(BaseModel):
     cvss_score: float
     severity: str
     description: str
+    fixed_version: str | None = None
+    exploit_available: bool = False   # True si un exploit public est connu (champ de la DB)
+    published_date: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -106,6 +110,15 @@ class AnalysisListResponse(AnalysisBase):
     status: str
     security_score: float | None = None
     created_at: datetime
+
+    # Point 2 : traçabilité du moteur CVE
+    cve_service_version: str | None = None
+
+    # Point 4 : informations de troncature (affichables dans les rapports)
+    # Ex: "Scan partiel : 100/174 dépendances analysées"
+    dependencies_truncated: bool = False
+    dependencies_scanned_count: int | None = None
+    dependencies_total_count: int | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
