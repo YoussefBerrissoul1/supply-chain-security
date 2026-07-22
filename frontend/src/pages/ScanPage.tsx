@@ -1,9 +1,19 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowRight, Download, RefreshCw, Clock, ChevronRight, Layers, Box, Server, HardDrive, History, Loader2 } from 'lucide-react';
+import { ArrowRight, Download, RefreshCw, Clock, ChevronRight, Layers, Box, Server, HardDrive, History, Loader2, AlertCircle, Wifi } from 'lucide-react';
 import { MagneticButton } from '@/components/MagneticButton';
 import { RiskMatrix } from '@/components/RiskMatrix';
 import { generateReport } from '@/lib/pdf/generateReport';
+import {
+  startGithubAnalysis,
+  startDockerAnalysis,
+  pollAnalysisStatus,
+  listAnalyses,
+  analysisToScanResult,
+  getReportUrl,
+  type AnalysisProgressAPI,
+  type AnalysisSummaryAPI,
+} from '@/lib/api';
 
 /* ─────────────────────────────────────────────────────────────────────────────
    Types
@@ -29,12 +39,16 @@ export interface ScanResult {
   dockerLayers?: DockerLayer[];
   dockerConfig?: DockerConfig;
   date?: string;
+  /** ID de l'analyse en base — utilisé pour télécharger le rapport PDF backend */
+  analysisId?: number;
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
    Static demo data
 ──────────────────────────────────────────────────────────────────────────────*/
-const RECENT_SCANS = [
+// Les scans récents sont maintenant chargés depuis le backend (listAnalyses)
+// Cette constante n'est utilisée qu'en fallback si le backend est inaccessible.
+const RECENT_SCANS_FALLBACK = [
   { target: 'github.com/facebook/react',     score: 78, type: 'github' as const, date: 'il y a 2h' },
   { target: 'github.com/expressjs/express',  score: 61, type: 'github' as const, date: 'il y a 5h' },
   { target: 'nginx:latest',                  score: 55, type: 'docker' as const, date: 'hier' },
@@ -284,7 +298,49 @@ function ScanForm({ onStart, onViewHistory }: { onStart: (url: string, mode: Sca
   const [inputVal, setInputVal]   = useState('');
   const [mode, setMode]           = useState<ScanMode>('standard');
   const inputType                 = detectInputType(inputVal);
-  const history                   = loadHistory();
+  const localHistory              = loadHistory();
+
+  // Historique chargé depuis le backend
+  const [backendHistory, setBackendHistory] = useState<AnalysisSummaryAPI[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
+
+  useEffect(() => {
+    listAnalyses(10)
+      .then((data) => setBackendHistory(data))
+      .catch(() => {
+        // Pas de backend disponible — on gardera le fallback local
+      })
+      .finally(() => setHistoryLoading(false));
+  }, []);
+
+  // Construire la liste affichée
+  const displayHistory = backendHistory.length > 0
+    ? backendHistory.slice(0, 4).map((s) => ({
+        target: s.repo_url,
+        score: Math.round(s.security_score ?? 0),
+        type: (s.target_type === 'docker' ? 'docker' : 'github') as 'github' | 'docker',
+        date: timeAgo(s.created_at),
+        status: s.status,
+        analysisId: s.id,
+        fullResult: null as ScanResult | null,
+      }))
+    : (localHistory.length > 0
+        ? localHistory.slice(0, 4).map((s) => ({
+            target: s.target,
+            score: s.score,
+            type: s.type,
+            date: timeAgo(s.date!),
+            status: 'done' as const,
+            analysisId: undefined as number | undefined,
+            fullResult: s,
+          }))
+        : RECENT_SCANS_FALLBACK.map((s) => ({
+            ...s,
+            status: 'done' as const,
+            analysisId: undefined as number | undefined,
+            fullResult: null as ScanResult | null,
+          }))
+      );
 
   return (
     <div className="min-h-screen bg-[#f7f8fb] font-sans">
@@ -382,50 +438,55 @@ function ScanForm({ onStart, onViewHistory }: { onStart: (url: string, mode: Sca
             </MagneticButton>
           </div>
 
-          {/* Recent scans — from localStorage or demo data */}
+          {/* Recent scans — from backend or localStorage */}
           <div>
             <div className="text-sm font-semibold text-[#4b4e5c] mb-3 flex items-center gap-2">
               <Clock size={14} />
               Dernières analyses
+              {backendHistory.length > 0 && (
+                <span className="ml-auto text-xs text-[#15803d] font-mono">● Backend connecté</span>
+              )}
             </div>
             <div className="space-y-2">
-              {(history.length > 0
-                ? history.slice(0, 4).map((s) => ({
-                    target: s.target,
-                    score: s.score,
-                    type: s.type,
-                    date: timeAgo(s.date!),
-                    fullResult: s,
-                  }))
-                : RECENT_SCANS.map((s) => ({ ...s, fullResult: null as ScanResult | null }))
-              ).map((s) => (
-                <button
-                  key={s.target}
-                  type="button"
-                  onClick={() => {
-                    if (s.fullResult) {
-                      onViewHistory(s.fullResult);
-                    } else {
-                      setInputVal(s.target);
-                    }
-                  }}
-                  className="w-full flex items-center gap-4 p-4 bg-white rounded-xl border border-[#e4e7f0] hover:border-[#c2410c] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c2410c] focus-visible:ring-offset-2 transition-all text-left group active:scale-[0.98]"
-                >
-                  <div className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center" style={{
-                    background: s.type === 'github' ? '#ffedd8' : '#f0fdf4',
-                  }}>
-                    {s.type === 'github' ? <Box className="w-4 h-4 text-[#c2410c]" /> : <Layers className="w-4 h-4 text-[#15803d]" />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-mono text-[#12131a] truncate">{s.target}</div>
-                    <div className="text-xs text-[#8a8d9c]">{s.date}</div>
-                  </div>
-                  <div className="shrink-0 font-bold text-sm" style={{ color: scoreColor(s.score) }}>
-                    {s.score}/100
-                  </div>
-                  <ChevronRight size={14} className="text-[#8a8d9c] group-hover:text-[#c2410c] transition-colors" />
-                </button>
-              ))}
+              {historyLoading ? (
+                <div className="flex items-center gap-2 p-4 text-sm text-[#8a8d9c]">
+                  <Loader2 size={14} className="animate-spin" />
+                  Chargement de l'historique...
+                </div>
+              ) : (
+                displayHistory.map((s) => (
+                  <button
+                    key={`${s.target}-${s.analysisId ?? s.date}`}
+                    type="button"
+                    onClick={() => {
+                      if (s.fullResult) {
+                        onViewHistory(s.fullResult);
+                      } else {
+                        setInputVal(s.target);
+                      }
+                    }}
+                    className="w-full flex items-center gap-4 p-4 bg-white rounded-xl border border-[#e4e7f0] hover:border-[#c2410c] hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c2410c] focus-visible:ring-offset-2 transition-all text-left group active:scale-[0.98]"
+                  >
+                    <div className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center" style={{
+                      background: s.type === 'github' ? '#ffedd8' : '#f0fdf4',
+                    }}>
+                      {s.type === 'github' ? <Box className="w-4 h-4 text-[#c2410c]" /> : <Layers className="w-4 h-4 text-[#15803d]" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-mono text-[#12131a] truncate">{s.target}</div>
+                      <div className="text-xs text-[#8a8d9c] flex items-center gap-2">
+                        {s.date}
+                        {s.status === 'running' && <span className="text-[#b45309] font-semibold">En cours...</span>}
+                        {s.status === 'failed'  && <span className="text-[#b91c1c] font-semibold">Echec</span>}
+                      </div>
+                    </div>
+                    <div className="shrink-0 font-bold text-sm" style={{ color: scoreColor(s.score) }}>
+                      {s.status === 'done' ? `${s.score}/100` : '—'}
+                    </div>
+                    <ChevronRight size={14} className="text-[#8a8d9c] group-hover:text-[#c2410c] transition-colors" />
+                  </button>
+                ))
+              )}
             </div>
           </div>
         </motion.div>
@@ -437,13 +498,25 @@ function ScanForm({ onStart, onViewHistory }: { onStart: (url: string, mode: Sca
 /* ─────────────────────────────────────────────────────────────────────────────
    Progress state
 ──────────────────────────────────────────────────────────────────────────────*/
-function ScanProgress({ target, inputType, onDone }: { target: string; inputType: InputType; onDone: (r: ScanResult) => void }) {
+function ScanProgress({
+  target,
+  inputType,
+  analysisId,
+  onDone,
+  onError,
+}: {
+  target: string;
+  inputType: InputType;
+  analysisId: number;
+  onDone: (r: ScanResult) => void;
+  onError: (msg: string) => void;
+}) {
   const [visibleLines, setVisibleLines] = useState<string[]>([]);
   const [elapsed, setElapsed]           = useState(0);
   const startTime                       = useRef(Date.now());
   const isDocker                        = inputType === 'docker';
-  const termLines                       = isDocker ? TERMINAL_DOCKER : TERMINAL_GITHUB;
 
+  // Timer secondes
   useEffect(() => {
     const t = setInterval(() => {
       setElapsed(Math.round((Date.now() - startTime.current) / 1000));
@@ -451,23 +524,78 @@ function ScanProgress({ target, inputType, onDone }: { target: string; inputType
     return () => clearInterval(t);
   }, []);
 
+  // Polling backend
   useEffect(() => {
-    const timeouts: ReturnType<typeof setTimeout>[] = [];
-    termLines.forEach((line, idx) => {
-      const t = setTimeout(() => {
-        setVisibleLines((prev) => [...prev, line.text]);
-      }, 600 + idx * 900);
-      timeouts.push(t);
+    let lastStatus = '';
+    let depsFound = 0;
+    let vulnsFound = 0;
+
+    const cancel = pollAnalysisStatus(analysisId, {
+      onProgress: (progress: AnalysisProgressAPI) => {
+        const newLines: string[] = [];
+
+        // Afficher les étapes en fonction du statut
+        if (lastStatus !== progress.status) {
+          if (progress.status === 'running') {
+            newLines.push('[INFO] Analyse démarrée sur le serveur...');
+            if (isDocker) {
+              newLines.push('[INFO] Connexion au registre Docker...');
+              newLines.push('[INFO] Extraction et analyse de l\'image...');
+            } else {
+              newLines.push('[INFO] Clonage du dépôt GitHub...');
+            }
+          }
+          lastStatus = progress.status;
+        }
+
+        // Nouveaux dépendances trouvées
+        if (progress.total_deps > depsFound) {
+          newLines.push(
+            `[INFO] ${progress.total_deps} dépendance${progress.total_deps > 1 ? 's' : ''} détectée${progress.total_deps > 1 ? 's' : ''}...`,
+          );
+          depsFound = progress.total_deps;
+        }
+
+        // Nouvelles vulnérabilités
+        if (progress.total_vulns > vulnsFound) {
+          const delta = progress.total_vulns - vulnsFound;
+          const crit = progress.vulns_by_severity['CRITICAL'] ?? 0;
+          newLines.push(
+            `[WARN] ${delta} nouvelle${delta > 1 ? 's' : ''} CVE détectée${delta > 1 ? 's' : ''} — dont ${crit} CRITIQUE${crit > 1 ? 'S' : ''}`,
+          );
+          vulnsFound = progress.total_vulns;
+        }
+
+        if (progress.total_recommendations > 0 && !visibleLines.some(l => l.includes('IA'))) {
+          newLines.push('[INFO] Génération des recommandations IA...');
+        }
+
+        if (newLines.length > 0) {
+          setVisibleLines((prev) => [...prev, ...newLines]);
+        }
+      },
+
+      onDone: (analysis) => {
+        setVisibleLines((prev) => [
+          ...prev,
+          '[INFO] Calcul du score de sécurité...',
+          '[INFO] Génération du rapport PDF...',
+          `[OK] Analyse terminée — Score : ${Math.round(analysis.security_score ?? 0)}/100`,
+        ]);
+        setTimeout(() => {
+          onDone(analysisToScanResult(analysis));
+        }, 800);
+      },
+
+      onError: (msg) => {
+        setVisibleLines((prev) => [...prev, `[ERREUR] ${msg}`]);
+        setTimeout(() => onError(msg), 1200);
+      },
     });
 
-    const done = setTimeout(() => {
-      const baseResult = isDocker ? DEMO_RESULT_DOCKER : DEMO_RESULT_GITHUB;
-      onDone({ ...baseResult, target, type: isDocker ? 'docker' : 'github' });
-    }, 600 + termLines.length * 900 + 500);
-    timeouts.push(done);
-
-    return () => timeouts.forEach(clearTimeout);
-  }, [target, onDone, isDocker, termLines]);
+    return () => cancel();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analysisId]);
 
   return (
     <div className="min-h-screen bg-[#f7f8fb] font-sans">
@@ -478,8 +606,8 @@ function ScanProgress({ target, inputType, onDone }: { target: string; inputType
       </div>
 
       <div className="max-w-3xl mx-auto px-6 py-16">
-        <motion.div 
-          initial={{ opacity: 0, y: 30, filter: 'blur(8px)' }} 
+        <motion.div
+          initial={{ opacity: 0, y: 30, filter: 'blur(8px)' }}
           animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
           transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
         >
@@ -502,6 +630,12 @@ function ScanProgress({ target, inputType, onDone }: { target: string; inputType
           </div>
 
           <TerminalPanel lines={visibleLines} showCursor />
+
+          {/* Indicateur de connexion backend */}
+          <div className="mt-4 flex items-center gap-2 text-xs text-[#8a8d9c]">
+            <Wifi className="w-3 h-3" />
+            <span>Connecté au backend — analyse #{analysisId}</span>
+          </div>
         </motion.div>
       </div>
     </div>
@@ -811,7 +945,6 @@ function ScanResults({ result, onReset }: { result: ScanResult; onReset: () => v
               </div>
             )}
 
-            {/* Rapport */}
             {activeTab === 'Rapport' && (
               <div className="bg-white rounded-2xl border border-[#e4e7f0] shadow-sm overflow-hidden">
                 <div className="p-8 border-b border-[#e4e7f0]">
@@ -834,18 +967,33 @@ function ScanResults({ result, onReset }: { result: ScanResult; onReset: () => v
                     <div><div className="text-[#8a8d9c] mb-1">Date</div><div className="font-mono text-[#12131a]">{new Date().toLocaleDateString('fr-FR')}</div></div>
                   </div>
                 </div>
-                <div className="p-8 bg-[#f7f8fb] text-center">
-                  <Download className="w-10 h-10 text-[#8a8d9c] mx-auto mb-4" />
-                  <p className="text-[#4b4e5c] mb-4">Le rapport PDF complet inclut toutes les vulnérabilités, recommandations et métriques de votre analyse.</p>
-                  <button
-                    type="button"
-                    onClick={handleDownloadPdf}
-                    disabled={isGeneratingPdf}
-                    className="inline-flex items-center gap-2 px-8 py-3 bg-[#c2410c] text-white rounded-full font-semibold hover:bg-[#b45309] transition-colors disabled:opacity-50"
-                  >
-                    {isGeneratingPdf ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
-                    {isGeneratingPdf ? 'Génération en cours...' : 'Générer le rapport complet'}
-                  </button>
+                <div className="p-8 bg-[#f7f8fb] flex flex-col items-center gap-4">
+                  <Download className="w-10 h-10 text-[#8a8d9c]" />
+                  <p className="text-[#4b4e5c] text-center">Le rapport PDF complet inclut toutes les vulnérabilités, recommandations et métriques de votre analyse.</p>
+                  <div className="flex flex-wrap gap-3 justify-center">
+                    {/* PDF généré par le backend (ReportLab) */}
+                    {result.analysisId && (
+                      <a
+                        href={getReportUrl(result.analysisId)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 px-8 py-3 bg-[#c2410c] text-white rounded-full font-semibold hover:bg-[#b45309] transition-colors"
+                      >
+                        <Download size={18} />
+                        Rapport PDF Backend
+                      </a>
+                    )}
+                    {/* PDF généré par le frontend (jsPDF) */}
+                    <button
+                      type="button"
+                      onClick={handleDownloadPdf}
+                      disabled={isGeneratingPdf}
+                      className="inline-flex items-center gap-2 px-8 py-3 bg-[#12131a] text-white rounded-full font-semibold hover:bg-[#12131a]/80 transition-colors disabled:opacity-50"
+                    >
+                      {isGeneratingPdf ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
+                      {isGeneratingPdf ? 'Génération...' : 'Rapport PDF Frontend'}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -860,15 +1008,43 @@ function ScanResults({ result, onReset }: { result: ScanResult; onReset: () => v
    Root component (state machine)
 ──────────────────────────────────────────────────────────────────────────────*/
 export function ScanPage() {
-  const [state, setState]       = useState<ScanState>('form');
-  const [target, setTarget]     = useState('');
-  const [inputType, setInputType] = useState<InputType>(null);
-  const [result, setResult]     = useState<ScanResult | null>(null);
+  const [state, setState]           = useState<ScanState>('form');
+  const [target, setTarget]         = useState('');
+  const [inputType, setInputType]   = useState<InputType>(null);
+  const [scanMode, setScanMode]     = useState<ScanMode>('standard');
+  const [analysisId, setAnalysisId] = useState<number | null>(null);
+  const [result, setResult]         = useState<ScanResult | null>(null);
+  const [apiError, setApiError]     = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleStart = useCallback((url: string, _mode: ScanMode, type: InputType) => {
+  /**
+   * handleStart — appelé quand l'utilisateur clique sur "Lancer l'analyse".
+   * 1. Appelle le backend (POST /analyze ou /analyze/docker)
+   * 2. Récupère l'ID de l'analyse
+   * 3. Passe en mode 'running' pour afficher le terminal de progression réelle
+   */
+  const handleStart = useCallback(async (url: string, mode: ScanMode, type: InputType) => {
+    setIsSubmitting(true);
+    setApiError(null);
     setTarget(url);
     setInputType(type);
-    setState('running');
+    setScanMode(mode);
+
+    try {
+      let analysis;
+      if (type === 'docker') {
+        analysis = await startDockerAnalysis(url, mode);
+      } else {
+        analysis = await startGithubAnalysis(url, mode);
+      }
+      setAnalysisId(analysis.id);
+      setState('running');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Erreur de connexion au backend.';
+      setApiError(message);
+    } finally {
+      setIsSubmitting(false);
+    }
   }, []);
 
   const handleDone = useCallback((r: ScanResult) => {
@@ -877,10 +1053,17 @@ export function ScanPage() {
     setState('results');
   }, []);
 
+  const handleError = useCallback((msg: string) => {
+    setApiError(msg);
+    setState('form');
+  }, []);
+
   const handleReset = useCallback(() => {
     setTarget('');
     setInputType(null);
     setResult(null);
+    setAnalysisId(null);
+    setApiError(null);
     setState('form');
   }, []);
 
@@ -890,22 +1073,60 @@ export function ScanPage() {
   }, []);
 
   return (
-    <AnimatePresence mode="wait">
-      {state === 'form' && (
-        <motion.div key="form" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-          <ScanForm onStart={handleStart} onViewHistory={handleViewHistory} />
+    <>
+      {/* Overlay "connexion en cours" */}
+      {isSubmitting && (
+        <div className="fixed inset-0 bg-black/20 backdrop-blur-sm z-50 flex items-center justify-center">
+          <div className="bg-white rounded-2xl shadow-2xl p-8 flex flex-col items-center gap-4">
+            <Loader2 size={40} className="animate-spin text-[#c2410c]" />
+            <p className="font-semibold text-[#12131a]">Connexion au backend...</p>
+            <p className="text-sm text-[#8a8d9c] font-mono truncate max-w-xs">{target}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Bandeau d'erreur */}
+      {apiError && state === 'form' && (
+        <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="fixed top-0 left-0 right-0 z-40 bg-[#fee2e2] border-b border-[#b91c1c]/20 px-6 py-4 flex items-center gap-3"
+        >
+          <AlertCircle size={16} className="text-[#b91c1c] shrink-0" />
+          <span className="text-sm text-[#b91c1c] font-medium flex-1">{apiError}</span>
+          <button
+            type="button"
+            onClick={() => setApiError(null)}
+            className="text-[#b91c1c] hover:text-[#7f1d1d] font-bold text-lg leading-none"
+          >
+            ×
+          </button>
         </motion.div>
       )}
-      {state === 'running' && (
-        <motion.div key="running" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-          <ScanProgress target={target} inputType={inputType} onDone={handleDone} />
-        </motion.div>
-      )}
-      {state === 'results' && result && (
-        <motion.div key="results" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-          <ScanResults result={result} onReset={handleReset} />
-        </motion.div>
-      )}
-    </AnimatePresence>
+
+      <AnimatePresence mode="wait">
+        {state === 'form' && (
+          <motion.div key="form" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <ScanForm onStart={handleStart} onViewHistory={handleViewHistory} />
+          </motion.div>
+        )}
+        {state === 'running' && analysisId !== null && (
+          <motion.div key="running" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <ScanProgress
+              target={target}
+              inputType={inputType}
+              analysisId={analysisId}
+              onDone={handleDone}
+              onError={handleError}
+            />
+          </motion.div>
+        )}
+        {state === 'results' && result && (
+          <motion.div key="results" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <ScanResults result={result} onReset={handleReset} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
   );
 }

@@ -23,6 +23,13 @@ export default defineConfig({
   server: {
     port,
     host: true,
+    proxy: {
+      // Redirige /api → http://localhost:8000/api (backend FastAPI)
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+    },
   },
   preview: {
     port,
