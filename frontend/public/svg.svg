@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <!-- Fond orange avec coins arrondis -->
+  <rect width="512" height="512" rx="100" fill="#e44d0a" />
+
+  <!-- Groupe principal agrandi de 18% et recentré -->
+  <g transform="translate(256, 256) scale(1.18) translate(-256, -255)">
+    
+    <!-- Structure principale (Bouclier et lignes du N) -->
+    <g stroke="#ffffff" stroke-width="26" fill="none" stroke-linejoin="miter" stroke-linecap="butt" stroke-miterlimit="4">
+      
+      <!-- Contour du bouclier -->
+      <path d="M 256 60 
+               L 416 110 
+               L 416 370 
+               L 256 450 
+               L 96 370 
+               L 96 110 Z" />
+
+      <!-- Partie gauche du "N" -->
+      <path d="M 256 60 
+               L 256 245 
+               L 176 165 
+               L 176 360" />
+
+      <!-- Partie droite du "N" -->
+      <path d="M 256 450 
+               L 256 265 
+               L 336 345 
+               L 336 140" />
+    </g>
+
+    <!-- Points de connexion (Noeuds) -->
+    <g fill="#ffffff">
+      <!-- Point en bas à gauche -->
+      <circle cx="176" cy="360" r="22" />
+      
+      <!-- Point en haut à droite -->
+      <circle cx="336" cy="140" r="22" />
+    </g>
+    
+  </g>
+</svg>

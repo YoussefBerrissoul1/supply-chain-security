@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Droplets, Zap, Recycle, TrendingUp, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import logoSrm from '@assets/logo_srm.png';
@@ -8,6 +8,7 @@ import srm3 from '@assets/smr3.avif';
 import srm4 from '@assets/smr4.avif';
 import srm5 from '@assets/srm5.jpeg';
 import srm6 from '@assets/srm6.jpeg';
+import srm7 from '@assets/srm7.png';
 
 const STATS = [
   { value: '194',        label: 'Communes desservies' },
@@ -46,22 +47,14 @@ const GALLERY_IMAGES = [
   { src: srm3, alt: "Infrastructure SRM-FM 3" },
   { src: srm4, alt: "Infrastructure SRM-FM 4" },
   { src: srm5, alt: "Infrastructure SRM-FM 5" },
-  { src: srm6, alt: "Infrastructure SRM-FM 6" }
+  { src: srm6, alt: "Infrastructure SRM-FM 6" },
+  { src: srm7, alt: "Infrastructure SRM-FM 7" }
 ];
 
 export function SRMEntreprise() {
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [isHovered, setIsHovered] = useState(false);
-
-  // Slideshow logic
-  useEffect(() => {
-    if (isHovered || lightboxIndex !== null) return;
-    const timer = setInterval(() => {
-      setCurrentIndex((prev) => (prev + 1) % GALLERY_IMAGES.length);
-    }, 4500);
-    return () => clearInterval(timer);
-  }, [isHovered, lightboxIndex]);
+  const wrapperRef = useRef<HTMLDivElement>(null);
 
   // Lock body scroll when lightbox is open
   useEffect(() => {
@@ -100,6 +93,32 @@ export function SRMEntreprise() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [lightboxIndex, nextImage, prevImage]);
 
+  // Intersection Observer for dots synchronization
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            const index = Number(entry.target.getAttribute('data-index'));
+            if (!isNaN(index)) {
+              setCurrentIndex(index);
+            }
+          }
+        });
+      },
+      {
+        root: wrapperRef.current,
+        // rootMargin réduite à une ligne fine au centre de l'écran pour déclencher exactement au milieu
+        rootMargin: '0px -50% 0px -50%',
+        threshold: 0,
+      }
+    );
+
+    const els = document.querySelectorAll('.gallery-item');
+    els.forEach(el => observer.observe(el));
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <>
       <section id="srm-entreprise" className="py-24 px-6 bg-white border-y border-[#12131a]/5">
@@ -128,7 +147,6 @@ export function SRMEntreprise() {
               viewport={{ once: false, amount: 0.1, margin: '-100px' }}
               transition={{ duration: 0.6 }}
             >
-              {/* SRM-FM logo chip — made even LARGER */}
               <div className="flex flex-col sm:flex-row items-center gap-6 mb-10 p-6 bg-[#f7f8fb] rounded-2xl border border-[#e4e7f0] w-fit shadow-sm">
                 <div className="w-40 h-40 bg-white rounded-xl border border-[#e4e7f0] flex items-center justify-center overflow-hidden shrink-0 p-4 shadow-sm transition-transform duration-500 hover:scale-105">
                   <img src={logoSrm} alt="Logo SRM-FM" className="w-full h-full object-contain" />
@@ -200,13 +218,13 @@ export function SRMEntreprise() {
             </motion.div>
           </div>
 
-          {/* Slideshow Gallery Section */}
+          {/* Infinite CSS Carousel Section */}
           <motion.div
             initial={{ opacity: 0, y: 30 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: false, amount: 0.1, margin: '-100px' }}
             transition={{ duration: 0.6 }}
-            className="mt-32"
+            className="mt-32 relative"
           >
             <div className="mb-12 text-center">
               <h3 className="font-serif text-3xl font-bold text-[#12131a] mb-4">
@@ -217,56 +235,98 @@ export function SRMEntreprise() {
               </p>
             </div>
 
-            <div 
-              className="relative rounded-2xl overflow-hidden aspect-[21/9] md:aspect-[21/7] shadow-lg bg-[#07080b] group cursor-pointer mx-auto"
-              onMouseEnter={() => setIsHovered(true)}
-              onMouseLeave={() => setIsHovered(false)}
-              onClick={() => setLightboxIndex(currentIndex)}
-            >
-              <AnimatePresence mode="wait">
-                <motion.img
-                  key={currentIndex}
-                  src={GALLERY_IMAGES[currentIndex].src}
-                  alt={GALLERY_IMAGES[currentIndex].alt}
-                  initial={{ opacity: 0, scale: 1 }}
-                  animate={{ opacity: 1, scale: 1.05 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ 
-                    opacity: { duration: 0.8 },
-                    scale: { duration: 6, ease: "linear" }
-                  }}
-                  className="absolute inset-0 w-full h-full object-cover grayscale transition-all duration-700 group-hover:grayscale-0"
-                />
-              </AnimatePresence>
-              
-              <div className="absolute inset-0 bg-gradient-to-t from-[#12131a]/80 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
-                 <span className="text-white text-lg font-medium opacity-0 group-hover:opacity-100 transform translate-y-4 group-hover:translate-y-0 transition-all duration-300 bg-white/10 backdrop-blur-md px-6 py-3 rounded-full">
-                    Agrandir l'image
-                 </span>
+            {/* Injection des Keyframes CSS pour le défilement fluide et infini */}
+            <style>{`
+              @keyframes infinite-scroll {
+                0% { transform: translateX(0); }
+                100% { transform: translateX(-50%); }
+              }
+              .animate-infinite-scroll {
+                /* 30s de défilement lent, parfaitement linéaire */
+                animation: infinite-scroll 30s linear infinite;
+              }
+              /* Pause automatique fluide au survol */
+              .carousel-wrapper:hover .animate-infinite-scroll {
+                animation-play-state: paused;
+              }
+            `}</style>
+
+            <div className="relative w-full overflow-hidden carousel-wrapper" ref={wrapperRef}>
+              {/* Le ruban de la "cassette" */}
+              <div className="flex w-max animate-infinite-scroll">
+                
+                {/* Set 1 */}
+                <div className="flex gap-6 pr-6">
+                  {GALLERY_IMAGES.map((img, idx) => (
+                    <div
+                      key={`set1-${idx}`}
+                      data-index={idx} // Utilisé par l'IntersectionObserver
+                      className="gallery-item w-[85vw] sm:w-[60vw] md:w-[45vw] lg:w-[35vw] aspect-[16/9] md:aspect-[21/9] shrink-0 relative rounded-2xl overflow-hidden cursor-pointer group/item shadow-lg bg-[#07080b]"
+                      onClick={() => setLightboxIndex(idx)}
+                    >
+                      <img
+                        src={img.src}
+                        alt={img.alt}
+                        className="absolute inset-0 w-full h-full object-cover grayscale transition-all duration-500 ease-in-out group-hover/item:grayscale-0 group-hover/item:scale-[1.03] group-hover/item:brightness-110 group-hover/item:contrast-105"
+                      />
+                      {/* Overlay d'indication au hover */}
+                      <div className="absolute inset-0 bg-gradient-to-t from-[#12131a]/60 to-transparent opacity-0 group-hover/item:opacity-100 transition-opacity duration-500 flex items-end justify-center pb-8">
+                         <span className="text-white text-sm font-medium tracking-wide bg-white/10 backdrop-blur-md px-6 py-2 rounded-full transform translate-y-4 group-hover/item:translate-y-0 transition-transform duration-500">
+                            Agrandir l'image
+                         </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Set 2 (Identique au Set 1 pour créer la boucle parfaite de 50%) */}
+                <div className="flex gap-6 pr-6">
+                  {GALLERY_IMAGES.map((img, idx) => (
+                    <div
+                      key={`set2-${idx}`}
+                      data-index={idx} // Toujours utile pour les dots lors du second passage
+                      className="gallery-item w-[85vw] sm:w-[60vw] md:w-[45vw] lg:w-[35vw] aspect-[16/9] md:aspect-[21/9] shrink-0 relative rounded-2xl overflow-hidden cursor-pointer group/item shadow-lg bg-[#07080b]"
+                      onClick={() => setLightboxIndex(idx)}
+                    >
+                      <img
+                        src={img.src}
+                        alt={img.alt}
+                        className="absolute inset-0 w-full h-full object-cover grayscale transition-all duration-500 ease-in-out group-hover/item:grayscale-0 group-hover/item:scale-[1.03] group-hover/item:brightness-110 group-hover/item:contrast-105"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-[#12131a]/60 to-transparent opacity-0 group-hover/item:opacity-100 transition-opacity duration-500 flex items-end justify-center pb-8">
+                         <span className="text-white text-sm font-medium tracking-wide bg-white/10 backdrop-blur-md px-6 py-2 rounded-full transform translate-y-4 group-hover/item:translate-y-0 transition-transform duration-500">
+                            Agrandir l'image
+                         </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
               </div>
 
-              {/* Dots indicator */}
-              <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-3 z-10">
-                {GALLERY_IMAGES.map((_, idx) => (
-                  <button
-                    key={idx}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setCurrentIndex(idx);
-                    }}
-                    className={`h-2 rounded-full transition-all duration-300 ${
-                      idx === currentIndex ? 'bg-white w-8' : 'bg-white/50 w-2 hover:bg-white/80'
-                    }`}
-                    aria-label={`Go to slide ${idx + 1}`}
-                  />
-                ))}
-              </div>
+              {/* Filtres de fondu sur les bords pour un look premium et estompé (optionnel mais recommandé) */}
+              <div className="absolute top-0 bottom-0 left-0 w-12 md:w-32 bg-gradient-to-r from-white to-transparent pointer-events-none z-10" />
+              <div className="absolute top-0 bottom-0 right-0 w-12 md:w-32 bg-gradient-to-l from-white to-transparent pointer-events-none z-10" />
             </div>
+
+            {/* Indicateurs de progression (Dots) synchronisés visuellement */}
+            <div className="flex justify-center gap-3 mt-8">
+              {GALLERY_IMAGES.map((_, idx) => (
+                <div
+                  key={idx}
+                  className={`h-2 rounded-full transition-all duration-300 ${
+                    idx === currentIndex ? 'bg-[#c2410c] w-8' : 'bg-[#e4e7f0] w-2'
+                  }`}
+                  aria-hidden="true"
+                />
+              ))}
+            </div>
+
           </motion.div>
         </div>
       </section>
 
-      {/* Lightbox Overlay */}
+      {/* Lightbox Overlay (Inchangé) */}
       <AnimatePresence>
         {lightboxIndex !== null && (
           <motion.div
