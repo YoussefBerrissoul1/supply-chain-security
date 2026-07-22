@@ -53,13 +53,24 @@ build/
 # GENERATED REPORTS
 # ==========================
 
-reports/*.pdf
+reports/
+backend/reports/
+*.pdf
 
 # ==========================
 # TEMP ANALYSIS FILES
 # ==========================
 
 temp_repositories/
+
+# ==========================
+# LARGE TEST FILES (ne pas versionner)
+# ==========================
+
+test_output.json
+trivy_sample.json
+trivy_test.json
+*.json.bak
 
 # ==========================
 # OS FILES
