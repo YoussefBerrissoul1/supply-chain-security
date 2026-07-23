@@ -31,7 +31,7 @@ const POLL_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 // Types — miroir des schémas Pydantic du backend
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type AnalysisStatus = 'pending' | 'running' | 'done' | 'failed';
+export type AnalysisStatus = 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
 export type ScanType       = 'standard' | 'deep';
 export type TargetType     = 'github' | 'docker';
 
@@ -249,6 +249,15 @@ export function getReportUrl(analysisId: number): string {
   return `${API_BASE}/analyses/${analysisId}/report`;
 }
 
+/**
+ * Annule une analyse en cours de manière asynchrone.
+ */
+export async function cancelAnalysis(analysisId: number): Promise<{message: string}> {
+  return apiFetch<{message: string}>(`/analyses/${analysisId}/cancel`, {
+    method: 'POST',
+  });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Polling — attend la fin d'une analyse
 // ─────────────────────────────────────────────────────────────────────────────
@@ -273,12 +282,18 @@ export function pollAnalysisStatus(
 ): () => void {
   let cancelled = false;
   const startedAt = Date.now();
+  let errorCount = 0;
+  const MAX_ERRORS = 3;
 
   async function tick() {
     if (cancelled) return;
 
     try {
       const progress = await getAnalysisProgress(analysisId);
+      
+      // En cas de succès, on réinitialise le compteur d'erreurs
+      errorCount = 0;
+      
       callbacks.onProgress?.(progress);
 
       if (progress.status === 'done') {
@@ -290,21 +305,25 @@ export function pollAnalysisStatus(
 
       if (progress.status === 'failed') {
         callbacks.onError?.("L'analyse a échoué côté serveur.");
-        return;
+        return; // arrêt du polling
       }
-
-      // Timeout global
-      if (Date.now() - startedAt > POLL_TIMEOUT_MS) {
-        callbacks.onError?.('Timeout : l\'analyse prend trop de temps.');
-        return;
+      
+      if (progress.status === 'cancelled') {
+        callbacks.onError?.("L'analyse a été annulée côté serveur.");
+        return; // arrêt du polling
       }
+      
     } catch (err) {
-      const message =
-        err instanceof ApiError
-          ? err.detail
-          : 'Erreur de connexion au serveur.';
-      callbacks.onError?.(message);
-      return;
+      errorCount++;
+      if (errorCount >= MAX_ERRORS) {
+        const message =
+          err instanceof ApiError
+            ? err.detail
+            : 'Erreur de connexion au serveur après plusieurs tentatives.';
+        callbacks.onError?.(message);
+        return; // arrêt du polling après MAX_ERRORS échecs
+      }
+      // Sinon, on ignore l'erreur et on attend le prochain tick
     }
 
     // Prochain tick

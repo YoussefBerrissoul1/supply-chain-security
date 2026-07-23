@@ -6,7 +6,9 @@ Représente une analyse de sécurité complète d'un dépôt GitHub.
 import enum
 from datetime import datetime
 
+# pyrefly: ignore [missing-import]
 from sqlalchemy import Boolean, DateTime, Enum, Float, Integer, String, func
+# pyrefly: ignore [missing-import]
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -18,6 +20,7 @@ class AnalysisStatus(str, enum.Enum):
     RUNNING = "running"
     DONE = "done"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class Analysis(Base):
@@ -42,6 +45,9 @@ class Analysis(Base):
     )
     status: Mapped[AnalysisStatus] = mapped_column(
         Enum(AnalysisStatus), default=AnalysisStatus.PENDING, nullable=False
+    )
+    cancel_requested: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
     )
     security_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     scan_type: Mapped[str] = mapped_column(

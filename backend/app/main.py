@@ -3,12 +3,15 @@ Point d'entrée de l'application FastAPI.
 Assemble les routes, configure CORS et le logging.
 """
 
+from datetime import datetime, timedelta, timezone
 import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
+from app.core.database import SessionLocal
+from app.models.analysis import Analysis, AnalysisStatus
 from app.routes.analysis_routes import router as analysis_router
 
 # --- Configuration du logging ---
@@ -66,6 +69,27 @@ def startup_event() -> None:
         logger.info("✅ OPENROUTER_API_KEY configurée — disponible en fallback si Gemini échoue")
     else:
         logger.info("ℹ️ OPENROUTER_API_KEY non configurée — pas de fallback OpenRouter")
+
+    # Nettoyage automatique des analyses bloquées (timeout)
+    db = SessionLocal()
+    try:
+        threshold = datetime.now(timezone.utc) - timedelta(minutes=15)
+        stale_analyses = db.query(Analysis).filter(
+            Analysis.status.in_([AnalysisStatus.PENDING, AnalysisStatus.RUNNING]),
+            Analysis.created_at < threshold
+        ).all()
+        
+        if stale_analyses:
+            logger.warning("Nettoyage : %d analyse(s) bloquée(s) détectée(s) (dépassant 15min)", len(stale_analyses))
+            for stale in stale_analyses:
+                stale.status = AnalysisStatus.FAILED
+                # Pas de champ "error_message" dans la BDD donc on marque juste FAILED
+                logger.warning("Analyse #%d marquée comme expirée/FAILED", stale.id)
+            db.commit()
+    except Exception as e:
+        logger.error("Erreur lors du nettoyage automatique : %s", e)
+    finally:
+        db.close()
 
 
 # --- Point d'entrée pour exécution directe ---

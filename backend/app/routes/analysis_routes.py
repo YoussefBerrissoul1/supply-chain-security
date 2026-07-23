@@ -12,8 +12,11 @@ import logging
 import traceback
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+# pyrefly: ignore [missing-import]
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Response
+# pyrefly: ignore [missing-import]
 from fastapi.responses import FileResponse
+# pyrefly: ignore [missing-import]
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
@@ -55,6 +58,15 @@ from app.services.report_service import generate_pdf_report
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+# ============================================================
+# HELPER: Verification de l'annulation
+# ============================================================
+def _is_cancel_requested(db: Session, analysis_id: int) -> bool:
+    """Verifie si une annulation a ete demandee pour cette analyse."""
+    analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
+    return analysis is not None and analysis.cancel_requested
 
 
 # ============================================================
@@ -108,6 +120,12 @@ def run_full_analysis(analysis_id: int, repo_url: str, scan_type: str = "standar
         # ----------------------------------------------------------
         # ETAPE 2 : Clonage du depot
         # ----------------------------------------------------------
+        if _is_cancel_requested(db, analysis_id):
+            logger.info("Annulation demandée avant l'étape 2 (Clonage) pour l'analyse #%d", analysis_id)
+            analysis.status = AnalysisStatus.CANCELLED
+            db.commit()
+            return
+
         repo_path = clone_repository(validated_url)
         logger.info("[2/8] Depot clone dans : %s", repo_path)
 
@@ -139,15 +157,18 @@ def run_full_analysis(analysis_id: int, repo_url: str, scan_type: str = "standar
         # ----------------------------------------------------------
         # ETAPE 4 : Detection des CVE (OSV + NVD)
         # ----------------------------------------------------------
+        if _is_cancel_requested(db, analysis_id):
+            logger.info("Annulation demandée avant l'étape 4 (CVE) pour l'analyse #%d", analysis_id)
+            analysis.status = AnalysisStatus.CANCELLED
+            db.commit()
+            return
+
         cve_results: dict[str, list[VulnerabilityResult]] = {}
         if dependencies:
             try:
-                # Passer le scan_type au service CVE (standard ou deep)
-                # standard : OSV + NVD si cvss=0, 8 workers parallèles
-                # deep     : OSV + NVD systématique, 3 workers (rate limit NVD)
                 cve_results = scan_all_vulnerabilities(dependencies, scan_type=scan_type)
 
-                # Extraire et sauvegarder les métadonnées de troncature (Point 4)
+                # Extraire et sauvegarder les métadonnées de troncature
                 scan_meta = cve_results.pop("__scan_meta__", {})
                 if scan_meta:
                     analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
@@ -155,21 +176,14 @@ def run_full_analysis(analysis_id: int, repo_url: str, scan_type: str = "standar
                         analysis.dependencies_truncated = scan_meta.get("deps_truncated", False)
                         analysis.dependencies_scanned_count = scan_meta.get("deps_scanned")
                         analysis.dependencies_total_count = scan_meta.get("deps_total")
-                        # Point 2 : enregistrer la version du moteur CVE
                         analysis.cve_service_version = CVE_SERVICE_VERSION
                         db.commit()
 
                 total_cves = sum(len(v) for v in cve_results.values())
                 logger.info("[4/8] %d CVE detectees (mode %s)", total_cves, scan_type)
             except Exception as cve_err:
-                # Une erreur réseau (timeout OSV/NVD) ne doit pas faire échouer toute l'analyse.
-                # On continue avec cve_results vide : les dépendances seront en base
-                # mais sans vulns. Le score sera plus optimiste mais l'analyse ne crash pas.
-                logger.error(
-                    "[4/8] Erreur lors du scan CVE (OSV/NVD) : %s. "
-                    "L'analyse continue sans données CVE.",
-                    cve_err,
-                )
+                logger.error("[4/8] Erreur lors du scan CVE (OSV/NVD) : %s", cve_err)
+                raise Exception(f"Le service d'analyse des vulnérabilités a échoué (Timeout ou API). Détail: {cve_err}")
 
         # Sauvegarder les vulnerabilites en base
         # Il faut relier chaque vuln a la dependance correspondante
@@ -242,29 +256,49 @@ def run_full_analysis(analysis_id: int, repo_url: str, scan_type: str = "standar
         # ----------------------------------------------------------
         # ETAPE 6 : Calcul du Security Score /100
         # ----------------------------------------------------------
-        score_result = compute_security_score(
-            cve_results=cve_results,
-            docker_result=docker_result,
-            dependencies=dependencies,
-        )
-        analysis.security_score = score_result.final_score
-        db.commit()
-        logger.info("[6/8] Score de securite : %.1f/100 (%s)",
-                    score_result.final_score, score_result.risk_level.value)
+        if _is_cancel_requested(db, analysis_id):
+            logger.info("Annulation demandée avant l'étape 6 (Score) pour l'analyse #%d", analysis_id)
+            analysis.status = AnalysisStatus.CANCELLED
+            db.commit()
+            return
+
+        try:
+            score_result = compute_security_score(
+                cve_results=cve_results,
+                docker_result=docker_result,
+                dependencies=dependencies,
+            )
+            analysis.security_score = score_result.final_score
+            db.commit()
+            logger.info("[6/8] Score de securite : %.1f/100 (%s)",
+                        score_result.final_score, score_result.risk_level.value)
+        except Exception as score_err:
+            logger.error("[6/8] Erreur lors du calcul du score : %s", score_err)
+            raise Exception(f"Erreur interne lors du calcul du score de sécurité : {score_err}")
 
         # ----------------------------------------------------------
         # ETAPE 7 : Recommandations IA (Gemini -> OpenRouter -> Statique)
         # ----------------------------------------------------------
-        recommendations = generate_recommendations(
-            db=db,
-            analysis_id=analysis_id,
-            score_result=score_result,
-            cve_results=cve_results,
-            repo_name=repo_name,
-            ecosystems=ecosystems,
-            total_deps=len(dependencies),
-        )
-        logger.info("[7/8] %d recommandations generees", len(recommendations))
+        if _is_cancel_requested(db, analysis_id):
+            logger.info("Annulation demandée avant l'étape 7 (IA) pour l'analyse #%d", analysis_id)
+            analysis.status = AnalysisStatus.CANCELLED
+            db.commit()
+            return
+
+        try:
+            recommendations = generate_recommendations(
+                db=db,
+                analysis_id=analysis_id,
+                score_result=score_result,
+                cve_results=cve_results,
+                repo_name=repo_name,
+                ecosystems=ecosystems,
+                total_deps=len(dependencies),
+            )
+            logger.info("[7/8] %d recommandations generees", len(recommendations) if recommendations else 0)
+        except Exception as ai_err:
+            logger.error("[7/8] Erreur lors de l'appel IA : %s", ai_err)
+            raise Exception(f"Le service IA n'a pas répondu à temps ou a échoué : {ai_err}")
 
         # ----------------------------------------------------------
         # ETAPE 8 : Generation du rapport PDF
@@ -363,6 +397,12 @@ def run_docker_analysis(analysis_id: int, image_name: str) -> None:
         if not is_trivy_available():
             raise Exception("Trivy n'est pas installe ou introuvable dans le PATH.")
 
+        if _is_cancel_requested(db, analysis_id):
+            logger.info("Annulation demandée avant le scan Trivy (Docker) pour l'analyse #%d", analysis_id)
+            analysis.status = AnalysisStatus.CANCELLED
+            db.commit()
+            return
+
         # Correction B : fallback scan_type si la colonne est None (anciennes entrees en base)
         scan_type = analysis.scan_type or "standard"
         logger.info("Type de scan : %s", scan_type)
@@ -449,33 +489,55 @@ def run_docker_analysis(analysis_id: int, image_name: str) -> None:
 
         db.commit()
 
-        # Calcul du score Docker proprement avec compute_security_score
-        from app.services.docker_scanner import DockerScanResult
-        docker_scan_obj = DockerScanResult(
-            base_image=image_name,
-            vulnerabilities_count=total_vulns,
-            vulnerabilities_by_severity=vulns_by_severity,
-            has_root_user=True,
-            image_score=image_score,
-            dockerfile_issues=[],
-        )
-        score_result = compute_security_score(
-            cve_results={},
-            docker_result=docker_scan_obj,
-            dependencies=[],
-        )
-        final_score = score_result.final_score
-        analysis.security_score = final_score
-        db.commit()
+        if _is_cancel_requested(db, analysis_id):
+            logger.info("Annulation demandée avant le calcul du score (Docker) pour l'analyse #%d", analysis_id)
+            analysis.status = AnalysisStatus.CANCELLED
+            db.commit()
+            return
 
-        # Generer recs IA 
+        # Calcul du score Docker proprement avec compute_security_score
+        try:
+            from app.services.docker_scanner import DockerScanResult
+            docker_scan_obj = DockerScanResult(
+                base_image=image_name,
+                vulnerabilities_count=total_vulns,
+                vulnerabilities_by_severity=vulns_by_severity,
+                has_root_user=True,
+                image_score=image_score,
+                dockerfile_issues=[],
+            )
+            score_result = compute_security_score(
+                cve_results={},
+                docker_result=docker_scan_obj,
+                dependencies=[],
+            )
+            final_score = score_result.final_score
+            analysis.security_score = final_score
+            db.commit()
+        except Exception as score_err:
+            logger.error("Erreur lors du calcul du score Docker : %s", score_err)
+            raise Exception(f"Erreur interne lors du calcul du score de sécurité : {score_err}")
+
+        if _is_cancel_requested(db, analysis_id):
+            logger.info("Annulation demandée avant l'étape IA (Docker) pour l'analyse #%d", analysis_id)
+            analysis.status = AnalysisStatus.CANCELLED
+            db.commit()
+            return
+
+        # Generer recs IA avec Timeout
         try:
             generate_recommendations(
-                db=db, analysis_id=analysis_id, score_result=score_result,
-                cve_results=cve_results, repo_name=image_name, ecosystems=["docker"], total_deps=len(deps_dict)
+                db=db, 
+                analysis_id=analysis_id, 
+                score_result=score_result,
+                cve_results=cve_results, 
+                repo_name=image_name, 
+                ecosystems=["docker"], 
+                total_deps=len(deps_dict)
             )
         except Exception as ai_err:
-            logger.warning("Recommandations IA non generees pour Docker #%d : %s", analysis_id, ai_err)
+            logger.error("Recommandations IA echouees (Timeout ou API) pour Docker #%d : %s", analysis_id, ai_err)
+            raise Exception(f"Le service IA a échoué : {ai_err}")
 
         analysis.status = AnalysisStatus.DONE
         db.commit()
@@ -486,6 +548,63 @@ def run_docker_analysis(analysis_id: int, image_name: str) -> None:
         _mark_analysis_failed(db, analysis_id, str(e))
     finally:
         db.close()
+
+
+# ============================================================
+# POST /analyses/{id}/cancel — Annuler une analyse
+# ============================================================
+@router.post(
+    "/analyses/{analysis_id}/cancel",
+    status_code=status.HTTP_200_OK,
+    summary="Annuler une analyse en cours",
+    description="Demande l'annulation d'une analyse PENDING ou RUNNING. L'annulation est asynchrone.",
+)
+def cancel_analysis(
+    analysis_id: int,
+    db: Session = Depends(get_db),
+):
+    analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analyse introuvable.")
+
+    if analysis.status not in (AnalysisStatus.PENDING, AnalysisStatus.RUNNING):
+        raise HTTPException(
+            status_code=409, 
+            detail=f"L'analyse ne peut pas être annulée car elle est déjà {analysis.status}."
+        )
+
+    analysis.cancel_requested = True
+    db.commit()
+    logger.info("Annulation asynchrone demandée pour l'analyse #%d", analysis_id)
+    return {"message": "Demande d'annulation prise en compte."}
+
+# ============================================================
+# POST /analyses/{id}/force-fail — Débloquer une analyse (Admin)
+# ============================================================
+@router.post(
+    "/analyses/{analysis_id}/force-fail",
+    status_code=status.HTTP_200_OK,
+    summary="Débloquer une analyse en la forçant à FAILED",
+    description="Permet de nettoyer une analyse restée bloquée indéfiniment en RUNNING.",
+)
+def force_fail_analysis(
+    analysis_id: int,
+    db: Session = Depends(get_db),
+):
+    analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analyse introuvable.")
+
+    if analysis.status not in (AnalysisStatus.PENDING, AnalysisStatus.RUNNING):
+        raise HTTPException(
+            status_code=400, 
+            detail=f"L'analyse ne peut pas être débloquée car elle est déjà {analysis.status}."
+        )
+
+    analysis.status = AnalysisStatus.FAILED
+    db.commit()
+    logger.info("Analyse #%d forcée à FAILED (déblocage manuel)", analysis_id)
+    return {"message": "Analyse débloquée et marquée comme échouée."}
 
 
 # ============================================================
@@ -503,6 +622,7 @@ def run_docker_analysis(analysis_id: int, image_name: str) -> None:
 def create_analysis(
     request: AnalysisRequest,
     background_tasks: BackgroundTasks,
+    response: Response,
     db: Session = Depends(get_db),
 ) -> Analysis:
     # --- Nettoyage et validation de l'URL ---
@@ -534,6 +654,7 @@ def create_analysis(
             "Analyse #%d déjà en cours pour '%s' (%s) — retour de l'existante",
             existing.id, repo_name, existing.status.value,
         )
+        response.status_code = status.HTTP_200_OK
         return existing
 
     logger.info("Nouvelle analyse %s demandee pour : %s", scan_type.upper(), repo_name)
@@ -776,6 +897,7 @@ class ImageScanRequest(PydanticBaseModel):
 def create_docker_analysis(
     request: ImageScanRequest,
     background_tasks: BackgroundTasks,
+    response: Response,
     db: Session = Depends(get_db),
 ) -> Analysis:
     image_name = request.image_name.strip()
@@ -799,6 +921,7 @@ def create_docker_analysis(
             "Image Docker '%s' déjà en cours de scan (#%d, %s) — retour de l'existante",
             image_name, existing.id, existing.status.value,
         )
+        response.status_code = status.HTTP_200_OK
         return existing
 
     logger.info("Nouvelle analyse Docker demandee : %s", image_name)

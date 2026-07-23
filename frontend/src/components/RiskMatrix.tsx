@@ -66,10 +66,13 @@ export function RiskMatrix({ vulns, isInteractive = true, isPdfMode = false }: R
   });
 
   return (
-    <div className="w-full flex flex-col items-center">
-      <div className={`flex w-full relative ${isPdfMode ? 'max-w-[400px]' : 'max-w-2xl'}`}>
-        {/* Y-axis Label */}
-        <div className={`flex flex-col justify-between pr-3 py-4 font-semibold text-[#8a8d9c] uppercase tracking-widest text-right whitespace-nowrap h-full ${isPdfMode ? 'text-[8px] max-w-[80px]' : 'text-xs'}`}>
+    <div className="w-full">
+      {/* Conteneur avec scroll horizontal pour mobile, avec un padding vertical pour ne pas couper le tooltip */}
+      <div className="w-full overflow-x-auto overflow-y-visible pb-4 pt-16 scrollbar-hide">
+        <div className="min-w-[340px] flex flex-col items-center mx-auto">
+          <div className={`flex w-full relative ${isPdfMode ? 'max-w-[400px]' : 'max-w-md'}`}>
+            {/* Y-axis Label */}
+            <div className={`flex flex-col justify-between pr-3 py-4 font-semibold text-[#8a8d9c] uppercase tracking-widest text-right whitespace-nowrap h-full ${isPdfMode ? 'text-[8px] max-w-[80px]' : 'text-[10px]'}`}>
           <div className="h-[20%] flex items-center justify-end">Très Probable</div>
           <div className="h-[20%] flex items-center justify-end">Probable</div>
           <div className="h-[20%] flex items-center justify-end">Possible</div>
@@ -91,7 +94,7 @@ export function RiskMatrix({ vulns, isInteractive = true, isPdfMode = false }: R
               return (
                 <div 
                   key={`${rowIdx}-${colIdx}`}
-                  className={`relative w-full aspect-square border rounded-lg flex items-center justify-center transition-all ${cellColor} ${isInteractive ? 'hover:scale-[1.03] hover:shadow-md hover:z-10 cursor-default' : ''}`}
+                  className={`group relative w-full aspect-square border rounded-lg flex items-center justify-center transition-all ${cellColor} ${isInteractive ? 'hover:scale-[1.03] hover:shadow-md hover:z-20 cursor-pointer' : ''}`}
                 >
                   {cellVulns.length > 0 && (
                     <div className={`${isPdfMode ? 'w-5 h-5 text-[10px]' : 'w-6 h-6 md:w-8 md:h-8 text-xs md:text-sm'} rounded-full bg-white shadow-sm flex items-center justify-center font-bold text-black`}>
@@ -101,13 +104,16 @@ export function RiskMatrix({ vulns, isInteractive = true, isPdfMode = false }: R
 
                   {/* Tooltip for Web Mode */}
                   {isInteractive && cellVulns.length > 0 && (
-                    <div className="absolute opacity-0 hover:opacity-100 bottom-full mb-2 bg-[#12131a] text-white text-xs p-3 rounded-lg shadow-xl w-48 z-50 pointer-events-none transition-opacity">
-                      <div className="font-bold mb-1 border-b border-white/20 pb-1">Vulnérabilités :</div>
-                      <div className="flex flex-col gap-1">
+                    <div className="absolute opacity-0 group-hover:opacity-100 pointer-events-none bottom-full mb-3 bg-[#12131a]/95 backdrop-blur-sm text-white text-[11px] p-3 rounded-xl shadow-2xl w-48 z-50 transition-all scale-95 group-hover:scale-100 origin-bottom">
+                      <div className="font-bold mb-2 pb-1.5 border-b border-white/10 flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full" style={{ background: RISK_COLORS[riskLevel].split(' ')[0].replace('bg-[', '').replace(']', '') }} />
+                        Vulnérabilités :
+                      </div>
+                      <div className="flex flex-col gap-1.5">
                         {cellVulns.map(v => (
-                          <div key={v.id} className="flex justify-between">
-                            <span className="font-mono">{v.id}</span>
-                            <span>{v.score}</span>
+                          <div key={v.id} className="flex justify-between items-center bg-white/5 rounded px-2 py-1">
+                            <span className="font-mono text-white/90">{v.id}</span>
+                            <span className="font-bold font-mono text-[#c2410c]">{v.score}</span>
                           </div>
                         ))}
                       </div>
@@ -121,25 +127,27 @@ export function RiskMatrix({ vulns, isInteractive = true, isPdfMode = false }: R
       </div>
       
       {/* X-axis Label */}
-      <div className={`w-full relative mt-2 ${isPdfMode ? 'max-w-[400px] pl-[80px]' : 'max-w-2xl pl-24'} pr-2`}>
-        <div className={`flex justify-between font-semibold text-[#8a8d9c] uppercase tracking-widest text-center px-2 ${isPdfMode ? 'text-[8px]' : 'text-xs'}`}>
+      <div className={`w-full relative mt-2 ${isPdfMode ? 'max-w-[400px] pl-[80px]' : 'max-w-md pl-[88px]'} pr-2`}>
+        <div className={`flex justify-between font-semibold text-[#8a8d9c] uppercase tracking-widest text-center px-1 ${isPdfMode ? 'text-[8px]' : 'text-[10px]'}`}>
           <span className="flex-1">Mineur</span>
           <span className="flex-1">Faible</span>
           <span className="flex-1">Modéré</span>
           <span className="flex-1">Majeur</span>
           <span className="flex-1">Sévère</span>
         </div>
-        <div className={`text-center text-[#4b4e5c] font-bold tracking-widest uppercase ${isPdfMode ? 'mt-1 text-[8px]' : 'mt-2 text-xs'}`}>
-          IMPACT (Sévérité)
+            <div className={`text-center text-[#4b4e5c] font-bold tracking-widest uppercase ${isPdfMode ? 'mt-1 text-[8px]' : 'mt-3 text-[10px]'}`}>
+              IMPACT (Sévérité)
+            </div>
+          </div>
         </div>
       </div>
 
       {/* Legend */}
-      <div className={`mt-6 flex flex-wrap justify-center gap-4 font-medium ${isPdfMode ? 'text-[9px]' : 'text-xs'}`}>
-        <div className="flex items-center gap-2"><div className={`w-4 h-4 rounded-full border ${RISK_COLORS['LOW']}`} /> Risque Faible</div>
-        <div className="flex items-center gap-2"><div className={`w-4 h-4 rounded-full border ${RISK_COLORS['MEDIUM']}`} /> Risque Modéré</div>
-        <div className="flex items-center gap-2"><div className={`w-4 h-4 rounded-full border ${RISK_COLORS['HIGH']}`} /> Risque Élevé</div>
-        <div className="flex items-center gap-2"><div className={`w-4 h-4 rounded-full border ${RISK_COLORS['CRITICAL']}`} /> Risque Critique</div>
+      <div className={`mt-2 flex flex-wrap justify-center gap-3 font-medium ${isPdfMode ? 'text-[9px]' : 'text-xs'} bg-white px-6 py-4 rounded-xl border border-[#e4e7f0] shadow-sm max-w-2xl mx-auto`}>
+        <div className="flex items-center gap-2"><div className={`w-3 h-3 rounded-full border ${RISK_COLORS['LOW']}`} /> <span className="text-[#4b4e5c]">Risque Faible</span></div>
+        <div className="flex items-center gap-2"><div className={`w-3 h-3 rounded-full border ${RISK_COLORS['MEDIUM']}`} /> <span className="text-[#4b4e5c]">Risque Modéré</span></div>
+        <div className="flex items-center gap-2"><div className={`w-3 h-3 rounded-full border ${RISK_COLORS['HIGH']}`} /> <span className="text-[#4b4e5c]">Risque Élevé</span></div>
+        <div className="flex items-center gap-2"><div className={`w-3 h-3 rounded-full border ${RISK_COLORS['CRITICAL']}`} /> <span className="text-[#4b4e5c]">Risque Critique</span></div>
       </div>
     </div>
   );
