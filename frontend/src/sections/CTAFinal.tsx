@@ -36,7 +36,7 @@ export function CTAFinal() {
           <div className="flex flex-col items-center gap-6">
             <MagneticButton
               className="px-10 py-5 text-lg font-bold"
-              onClick={() => (window.location.href = '/scan')}
+              onClick={() => (window.location.href = '/scan?new=true')}
             >
               Lancer un scan
             </MagneticButton>

@@ -154,7 +154,7 @@ export function Hero() {
         >
           <MagneticButton
             className="w-full sm:w-auto px-8 py-4 text-base font-semibold"
-            onClick={() => (window.location.href = '/scan')}
+            onClick={() => (window.location.href = '/scan?new=true')}
           >
             Lancer un scan
           </MagneticButton>

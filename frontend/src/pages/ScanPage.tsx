@@ -263,6 +263,7 @@ function ScanForm({ onStart, onViewHistory, isSubmitting }: { onStart: (url: str
 
   const [backendHistory, setBackendHistory] = useState<AnalysisSummaryAPI[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
+  const [loadingHistoryId, setLoadingHistoryId] = useState<number | null>(null);
 
   useEffect(() => {
     listAnalyses(10)
@@ -290,6 +291,27 @@ function ScanForm({ onStart, onViewHistory, isSubmitting }: { onStart: (url: str
       analysisId: undefined as number | undefined,
       fullResult: s,
     }));
+
+  const handleHistoryClick = async (s: any) => {
+    if (s.fullResult) {
+      onViewHistory(s.fullResult);
+      return;
+    }
+    if (s.analysisId && s.status === 'done') {
+      setLoadingHistoryId(s.analysisId);
+      try {
+        const full = await getAnalysis(s.analysisId);
+        onViewHistory(analysisToScanResult(full));
+      } catch (err) {
+        console.error("Failed to load full history:", err);
+        setInputVal(s.target);
+      } finally {
+        setLoadingHistoryId(null);
+      }
+    } else {
+      setInputVal(s.target);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[#f7f8fb] font-sans">
@@ -369,11 +391,8 @@ function ScanForm({ onStart, onViewHistory, isSubmitting }: { onStart: (url: str
                   <button
                     key={`${s.target}-${s.analysisId ?? s.date}`}
                     type="button"
-                    disabled={isSubmitting}
-                    onClick={() => {
-                      if (s.fullResult) onViewHistory(s.fullResult);
-                      else setInputVal(s.target);
-                    }}
+                    disabled={isSubmitting || loadingHistoryId !== null}
+                    onClick={() => handleHistoryClick(s)}
                     className="w-full flex items-center gap-4 p-4 bg-white rounded-xl border border-[#e4e7f0] hover:border-[#c2410c] hover:shadow-sm transition-all text-left group disabled:opacity-50"
                   >
                     <div className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: s.type === 'github' ? '#ffedd8' : '#f0fdf4' }}>
@@ -387,8 +406,12 @@ function ScanForm({ onStart, onViewHistory, isSubmitting }: { onStart: (url: str
                         {s.status === 'failed' && <span className="text-[#b91c1c] font-semibold">Echec</span>}
                       </div>
                     </div>
-                    <div className="shrink-0 font-bold text-sm" style={{ color: scoreColor(s.score) }}>{s.status === 'done' ? `${s.score}/100` : '—'}</div>
-                    <ChevronRight size={14} className="text-[#8a8d9c] group-hover:text-[#c2410c] transition-colors" />
+                    <div className="shrink-0 font-bold text-sm mr-2" style={{ color: scoreColor(s.score) }}>{s.status === 'done' ? `${s.score}/100` : '—'}</div>
+                    {loadingHistoryId === s.analysisId ? (
+                      <Loader2 size={14} className="text-[#c2410c] animate-spin" />
+                    ) : (
+                      <ChevronRight size={14} className="text-[#8a8d9c] group-hover:text-[#c2410c] transition-colors" />
+                    )}
                   </button>
                 ))
               )}
@@ -748,6 +771,14 @@ export function ScanPage() {
   const [isRestoring, setIsRestoring] = useState(true);
 
   useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search);
+    if (searchParams.get('new') === 'true') {
+      clearActiveScan();
+      setIsRestoring(false);
+      window.history.replaceState({}, '', '/scan');
+      return;
+    }
+
     const active = loadActiveScan();
     if (!active) {
       setIsRestoring(false);

@@ -127,7 +127,7 @@ export function Navbar() {
         <div className="hidden md:block">
           <MagneticButton
             className="px-6 py-2.5 text-sm"
-            onClick={() => setLocation('/scan')}
+            onClick={() => setLocation('/scan?new=true')}
           >
             Lancer un scan
           </MagneticButton>
@@ -177,7 +177,7 @@ export function Navbar() {
               className="w-full py-3"
               onClick={() => {
                 setIsMobileMenuOpen(false);
-                setLocation('/scan');
+                setLocation('/scan?new=true');
               }}
             >
               Lancer un scan
