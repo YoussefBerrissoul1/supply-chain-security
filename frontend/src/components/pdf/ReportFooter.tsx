@@ -17,13 +17,11 @@ export function ReportFooter({ pageNumber, totalPages }: ReportFooterProps) {
       <div className="w-full h-px bg-[#e4e7f0] mb-4" />
       <div className="flex items-center justify-between text-[10px] text-[#8a8d9c] font-sans">
         <div className="flex flex-col">
-          <span className="font-semibold text-[#12131a]">NEXORA Security Scanner</span>
-          <span>Version 1.2.0 • Rapport généré le {currentDate}</span>
+          <span className="font-semibold text-[#12131a]">NEXORA  Scanner</span>
           <span className="mt-0.5 text-[#12131a] font-medium">Réalisé par YOUSSEF BERRISOUL</span>
-        </div>
-        
+        </div> 
         <div className="text-center px-4 max-w-[50%]">
-          CONFIDENTIALITÉ STRICTE — Ce rapport contient des informations sensibles sur l'infrastructure de la SRM-FM. Ne pas distribuer.
+           SRM-FM & ENSIASD
         </div>
         
         <div className="text-right font-mono font-bold text-[#12131a]">

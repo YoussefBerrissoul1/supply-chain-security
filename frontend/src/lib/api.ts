@@ -428,12 +428,10 @@ export function analysisToScanResult(analysis: AnalysisDetailAPI): import('../pa
     status: mapDepStatus(dep),
   }));
 
-  // Recommandation IA (prendre la première recommandation globale ou la première disponible)
-  const aiRec =
-    analysis.recommendations.find((r) => r.target_type === 'global')
-      ?.recommendation_text ??
-    analysis.recommendations[0]?.recommendation_text ??
-    'Aucune recommandation générée.';
+  // Recommandation IA : combiner toutes les recommandations générées
+  const aiRec = analysis.recommendations.length > 0
+    ? analysis.recommendations.map((r) => r.recommendation_text).join('\n\n')
+    : 'Aucune recommandation générée.';
 
   // Docker config (approximation à partir des données backend)
   const dockerConfig = analysis.docker_result

@@ -41,6 +41,7 @@ export interface ScanResult {
   dockerConfig?: DockerConfig;
   date?: string;
   analysisId?: number;
+  isHistorical?: boolean;
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -186,7 +187,6 @@ function AITerminal({ text, isFinished, onFinish }: { text: string; isFinished: 
       if (textIdx < text.length) {
         // Animation du texte brut
         const t = setTimeout(() => {
-          // On avance plus vite pour les gros blocs
           setIdx((prev) => Math.min(prev + 3, text.length));
         }, 15);
         return () => clearTimeout(t);
@@ -294,6 +294,7 @@ function ScanForm({ onStart, onViewHistory, isSubmitting }: { onStart: (url: str
 
   const handleHistoryClick = async (s: any) => {
     if (s.fullResult) {
+      s.fullResult.isHistorical = true;
       onViewHistory(s.fullResult);
       return;
     }
@@ -301,7 +302,9 @@ function ScanForm({ onStart, onViewHistory, isSubmitting }: { onStart: (url: str
       setLoadingHistoryId(s.analysisId);
       try {
         const full = await getAnalysis(s.analysisId);
-        onViewHistory(analysisToScanResult(full));
+        const res = analysisToScanResult(full);
+        res.isHistorical = true;
+        onViewHistory(res);
       } catch (err) {
         console.error("Failed to load full history:", err);
         setInputVal(s.target);
@@ -532,7 +535,7 @@ function ScanResults({ result, onReset }: { result: ScanResult; onReset: () => v
   const tabs = getTabs(result.type);
   const [activeTab, setActiveTab] = useState<string>(tabs[0]);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
-  const [aiAnimationFinished, setAiAnimationFinished] = useState(false);
+  const [aiAnimationFinished, setAiAnimationFinished] = useState(result.isHistorical === true);
 
   const stats = result.stats ?? [];
   const vulns = result.vulns ?? [];
@@ -791,7 +794,9 @@ export function ScanPage() {
 
     if (active.phase === 'results') {
       getAnalysis(active.analysisId).then((detail) => {
-        setResult(analysisToScanResult(detail));
+        const res = analysisToScanResult(detail);
+        res.isHistorical = true;
+        setResult(res);
         setState('results');
       }).catch(() => {
         clearActiveScan();
@@ -856,6 +861,8 @@ export function ScanPage() {
   }, []);
 
   const handleViewHistory = useCallback((r: ScanResult) => {
+    // If not explicitly set, we assume it's historical when viewed via handleViewHistory
+    if (r.isHistorical === undefined) r.isHistorical = true;
     setResult(r);
     if (r.analysisId) saveActiveScan({ phase: 'results', analysisId: r.analysisId, target: r.target, inputType: r.type, scanMode: 'standard' });
     setState('results');
@@ -905,7 +912,7 @@ export function ScanPage() {
       )}
 
       {state === 'results' && result && (
-        <motion.div key="results" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+        <motion.div key={`results-${result.analysisId ?? 'new'}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
           <ScanResults result={result} onReset={handleReset} />
         </motion.div>
       )}

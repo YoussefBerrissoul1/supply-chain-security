@@ -2,19 +2,38 @@ import React from 'react';
 import { ScanResult } from '@/pages/ScanPage';
 import { ReportCover } from './ReportCover';
 import { ReportOverview } from './ReportOverview';
+import { ReportDockerConfig } from './ReportDockerConfig';
 import { ReportVulnerabilities } from './ReportVulnerabilities';
 import { ReportRecommendations } from './ReportRecommendations';
+import { ReportBestPractices } from './ReportBestPractices';
+import { ReportConclusion } from './ReportConclusion';
 import { ReportFooter } from './ReportFooter';
+import { balancedChunks } from './reportUtils';
 
 interface PDFReportTemplateProps {
   data: ScanResult;
 }
 
+const VULN_IDEAL_PER_PAGE = 6;
+const RECPLAN_IDEAL_PER_PAGE = 3;
+
 export function PDFReportTemplate({ data }: PDFReportTemplateProps) {
-  // Calculate total pages for footer (Cover = 1, Overview = 2, Vulns = N, Recommendations = N+1)
-  const ITEMS_PER_PAGE = 7;
-  const vulnPages = Math.ceil(data.vulns.length / ITEMS_PER_PAGE) || 1;
-  const totalPages = 1 + 1 + vulnPages + 1; // Cover + Overview + Vulns + Recs
+  const vulnPages = balancedChunks(data.vulns, VULN_IDEAL_PER_PAGE).length || 1;
+
+  const combinedRecPlanCount = data.aiRec ? data.aiRec.split('\n\n').length : 0;
+  const recPlanPages = combinedRecPlanCount > 0 ? Math.ceil(combinedRecPlanCount / RECPLAN_IDEAL_PER_PAGE) : 1;
+
+  const hasDockerPage = !!data.dockerConfig;
+
+  // Cover + Overview + (Docker Config optionnel) + Vulns + Recs&Plan (fusionnés) + Bonnes Pratiques + Conclusion
+  const totalPages = 1 + 1 + (hasDockerPage ? 1 : 0) + vulnPages + recPlanPages + 1 + 1;
+
+  const overviewPageNumber = 2;
+  const dockerPageNumber = hasDockerPage ? 3 : null;
+  const vulnStartPage = hasDockerPage ? 4 : 3;
+  const recPlanStartPage = vulnStartPage + vulnPages;
+  const bestPracticesPageNumber = recPlanStartPage + recPlanPages;
+  const conclusionPageNumber = bestPracticesPageNumber + 1;
 
   return (
     <div className="bg-[#e4e7f0] flex flex-col items-center p-8 gap-8 font-sans antialiased pdf-report-container">
@@ -26,16 +45,28 @@ export function PDFReportTemplate({ data }: PDFReportTemplateProps) {
       {/* Page 2: Overview */}
       <div className="relative shadow-2xl pdf-page-element">
         <ReportOverview data={data} />
-        <ReportFooter pageNumber={2} totalPages={totalPages} />
+        <ReportFooter pageNumber={overviewPageNumber} totalPages={totalPages} />
       </div>
 
-      {/* Page 3+: Vulnerabilities */}
-      <ReportVulnerabilities data={data} startPage={3} totalPages={totalPages} />
+      {/* Page 3 (optionnelle) : Configuration Docker, isolée pour ne plus déborder */}
+      {hasDockerPage && (
+        <div className="relative shadow-2xl pdf-page-element">
+          <ReportDockerConfig data={data} />
+          <ReportFooter pageNumber={dockerPageNumber as number} totalPages={totalPages} />
+        </div>
+      )}
 
-      {/* Final Page: Recommendations */}
-      <div className="relative shadow-2xl pdf-page-element">
-        <ReportRecommendations data={data} pageNumber={totalPages} totalPages={totalPages} />
-      </div>
+      {/* Vulnérabilités (pagination équilibrée) */}
+      <ReportVulnerabilities data={data} startPage={vulnStartPage} totalPages={totalPages} />
+
+      {/* Recommandations IA + Plan de remédiation : UNE SEULE section fusionnée */}
+      <ReportRecommendations data={data} startPage={recPlanStartPage} totalPages={totalPages} />
+
+      {/* Bonnes pratiques — toujours affichées, même à 100/100 */}
+      <ReportBestPractices pageNumber={bestPracticesPageNumber} totalPages={totalPages} />
+
+      {/* Conclusion */}
+      <ReportConclusion data={data} pageNumber={conclusionPageNumber} totalPages={totalPages} />
     </div>
   );
 }

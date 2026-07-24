@@ -271,12 +271,10 @@ def _generate_with_openrouter(
         "X-Title": "Supply Chain Security Scanner",           # Requis par OpenRouter
     }
 
-    # Modèles disponibles gratuitement sur OpenRouter — par ordre de priorité
-    # qwen3-coder:free = Qwen3 Coder 480B (meilleur modèle free, excellent pour code+sécurité)
     models_to_try = [
-        "qwen/qwen3-coder:free",                             # PRIORITÉ 1 : Qwen3 Coder 480B
-        "meta-llama/llama-3.3-70b-instruct:free",           # Fallback 2 : Llama 3.3 70B
-        "mistralai/mistral-7b-instruct:free",               # Fallback 3 : Mistral 7B
+        "openrouter/free",                                   # PRIORITÉ 1 : Auto-routing vers le meilleur modèle gratuit
+        "google/gemma-4-31b-it:free",                        # Fallback 2 : Gemma 4
+        "cohere/north-mini-code:free",                       # Fallback 3 : Cohere Code
     ]
 
     last_error = None
