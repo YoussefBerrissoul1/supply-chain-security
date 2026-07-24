@@ -347,8 +347,9 @@ export function pollAnalysisStatus(
 
 /** Convertit la sévérité backend (CRITICAL/HIGH/MEDIUM/LOW) en français */
 function mapSeverity(
-  sev: string,
+  sev: string | null | undefined,
 ): 'CRITIQUE' | 'HAUTE' | 'MOYENNE' | 'BASSE' {
+  if (!sev) return 'BASSE';
   switch (sev.toUpperCase()) {
     case 'CRITICAL': return 'CRITIQUE';
     case 'HIGH':     return 'HAUTE';
@@ -416,7 +417,7 @@ export function analysisToScanResult(analysis: AnalysisDetailAPI): import('../pa
       severity: mapSeverity(v.severity),
       pkg: `${dep.name}@${dep.version}`,
       desc: v.description,
-      score: v.cvss_score,
+      score: v.cvss_score || 0,
     })),
   );
 
