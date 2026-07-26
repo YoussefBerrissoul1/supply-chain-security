@@ -38,6 +38,7 @@ CLONE_TIMEOUT_SECONDS: int = 180
 # On préfère les fichiers à la racine (profondeur minimale) — 1 niveau = central
 MAX_FILES_PER_ECOSYSTEM: int = 5   # Max fichiers par écosystème (python, nodejs...)
 MAX_TOTAL_DEP_FILES: int = 20      # Max total de fichiers de dépendances
+MAX_REPO_SIZE_MB: int = 500         # P4 : Taille max d'un repo accepté (en MB)
 
 # Pattern regex pour valider une URL GitHub
 # Accepte : https://github.com/user/repo ou https://github.com/user/repo.git
@@ -184,6 +185,36 @@ def clone_repository(repo_url: str) -> Path:
     # --- Étape 1 : Extraire le nom du repo ---
     repo_name = repo_url.rstrip("/").split("/")[-1].replace(".git", "")
 
+    # --- P4 : Vérifier la taille du repo avant clonage ---
+    # Utilise l'API GitHub REST pour éviter de cloner un repo de plusieurs GB
+    try:
+        import requests
+        parts = repo_url.rstrip("/").replace(".git", "").split("/")
+        owner, name = parts[-2], parts[-1]
+        api_url = f"https://api.github.com/repos/{owner}/{name}"
+        api_headers: dict[str, str] = {"Accept": "application/vnd.github.v3+json"}
+        if settings.GITHUB_TOKEN:
+            api_headers["Authorization"] = f"token {settings.GITHUB_TOKEN}"
+        resp = requests.get(api_url, headers=api_headers, timeout=10)
+        if resp.status_code == 200:
+            repo_size_kb = resp.json().get("size", 0)
+            repo_size_mb = repo_size_kb / 1024
+            if repo_size_mb > MAX_REPO_SIZE_MB:
+                logger.error(
+                    "Repo %s trop volumineux (%.0f MB > %d MB max)",
+                    repo_url, repo_size_mb, MAX_REPO_SIZE_MB
+                )
+                raise GitHubAnalyzerError(
+                    f"Le dépôt est trop volumineux ({repo_size_mb:.0f} MB). "
+                    f"Maximum autorisé : {MAX_REPO_SIZE_MB} MB."
+                )
+            logger.info("Taille du repo %s : %.0f MB (limite : %d MB)", repo_name, repo_size_mb, MAX_REPO_SIZE_MB)
+    except GitHubAnalyzerError:
+        raise
+    except Exception as e:
+        # Erreur API non bloquante : on continue quand même le clone
+        logger.debug("Vérification taille repo non critique : %s", e)
+
     # --- Étape 2 : Construire le chemin de destination ---
     clone_dir = Path(settings.CLONE_DIRECTORY)
 
@@ -217,28 +248,34 @@ def clone_repository(repo_url: str) -> Path:
                     f"Fermez les programmes qui pourraient l'utiliser et réessayez."
                 ) from e
 
-    # --- Étape 4 : Cloner avec timeout ---
     logger.info("Clonage de %s vers %s ...", repo_url, clone_path)
     start_time = time.time()
 
-    # Injecter le token GitHub si disponible (augmente les limites de débit et l'accès)
-    clone_url = repo_url
-    if settings.GITHUB_TOKEN:
-        # Format : https://TOKEN@github.com/user/repo
-        clone_url = repo_url.replace("https://", f"https://{settings.GITHUB_TOKEN}@")
-
     try:
+        # Préparer les options de clonage
+        clone_multi_options = ["--filter=blob:none"]
+
+        # Injecter le token GitHub de manière SÉCURISÉE via un header HTTP
+        # (et non dans l'URL qui serait loggée par Git dans .git/config)
+        if settings.GITHUB_TOKEN:
+            # Encode le token dans un header Authorization — jamais dans l'URL
+            clone_multi_options.append(
+                f"-c http.extraHeader=Authorization: Basic {settings.GITHUB_TOKEN}"
+            )
+
         Repo.clone_from(
-            url=clone_url,
+            url=repo_url,           # URL sans token (propre)
             to_path=str(clone_path),
-            depth=1,          # Clone superficiel = dernier commit seulement (rapide)
-            single_branch=True,  # Ne cloner que la branche par défaut
+            depth=1,                # Clone superficiel — dernier commit seulement
+            single_branch=True,
             env={
-                # Timeout Git : coupe la connexion si trop long
-                "GIT_HTTP_LOW_SPEED_LIMIT": "1000",       # Minimum 1 Ko/s
-                "GIT_HTTP_LOW_SPEED_TIME": "60",           # Pendant 60 secondes max
+                # Timeout Git : coupe si vitesse < 1Ko/s pendant 60s
+                "GIT_HTTP_LOW_SPEED_LIMIT": "1000",
+                "GIT_HTTP_LOW_SPEED_TIME": "60",
+                # Désactiver l'invite de mot de passe interactive (CI/CD)
+                "GIT_TERMINAL_PROMPT": "0",
             },
-            multi_options=["--filter=blob:none"]
+            multi_options=clone_multi_options
         )
 
         # Calculer le temps de clonage
@@ -332,9 +369,27 @@ def detect_dependency_files(repo_path: Path) -> dict[str, list[str]]:
     found_files: dict[str, list[str]] = {}
     total_files_found = 0
 
+    # --- SEC2 : Résolution du chemin absolu du repo (ancrage sécurité) ---
+    repo_path_resolved = repo_path.resolve()
+
     # --- Parcours récursif de tous les fichiers ---
     try:
-        all_files_in_repo = [f for f in repo_path.rglob("*") if f.is_file()]
+        all_files_in_repo: list[Path] = []
+        for f in repo_path.rglob("*"):
+            if not f.is_file():
+                continue
+            # SEC2 : Exclure les symlinks (risque de path traversal)
+            if f.is_symlink():
+                logger.debug("Symlink ignoré (sécurité) : %s", f)
+                continue
+            # SEC2 : Vérifier que le fichier résolu est bien enfant du repo
+            try:
+                f_resolved = f.resolve()
+                f_resolved.relative_to(repo_path_resolved)
+            except (ValueError, OSError):
+                logger.warning("Fichier hors repo ignoré (path traversal) : %s", f)
+                continue
+            all_files_in_repo.append(f)
     except PermissionError as e:
         logger.error("Permission refusée lors du scan de %s : %s", repo_path, e)
         raise GitHubAnalyzerError(

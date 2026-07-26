@@ -31,7 +31,7 @@ const POLL_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 // Types — miroir des schémas Pydantic du backend
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type AnalysisStatus = 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
+export type AnalysisStatus = 'pending' | 'running' | 'done' | 'failed' | 'cancelled' | 'incomplete';
 export type ScanType       = 'standard' | 'deep';
 export type TargetType     = 'github' | 'docker';
 
@@ -41,9 +41,12 @@ export interface VulnerabilityAPI {
   cvss_score: number;
   severity: string; // "CRITICAL" | "HIGH" | "MEDIUM" | "LOW"
   description: string;
+  cvss_source: string;
   fixed_version?: string | null;
   exploit_available: boolean;
   published_date?: string | null;
+  epss_score?: number | null;    // Probabilité d'exploitation FIRST.org (0.0–1.0)
+  cwe?: string | null;           // Ex: "CWE-79"
 }
 
 export interface DependencyAPI {
@@ -86,10 +89,15 @@ export interface AnalysisSummaryAPI {
   created_at: string;
   scan_type: string;
   target_type: string;
+  cancel_requested: boolean;
   cve_service_version?: string | null;
   dependencies_truncated: boolean;
   dependencies_scanned_count?: number | null;
   dependencies_total_count?: number | null;
+  deps_detected?: number | null;
+  deps_analyzed?: number | null;
+  commit_sha?: string | null;
+  coverage_percent?: number | null;
 }
 
 /** Réponse détaillée (GET /analyses/{id}) */
@@ -192,16 +200,18 @@ export async function startGithubAnalysis(
 
 /**
  * Lance une analyse d'image Docker en arrière-plan.
+ * Utilise le même endpoint /analyze avec target_type='docker'.
  */
 export async function startDockerAnalysis(
   imageName: string,
   scanType: ScanType = 'standard',
 ): Promise<AnalysisSummaryAPI> {
-  return apiFetch<AnalysisSummaryAPI>('/analyze/docker', {
+  return apiFetch<AnalysisSummaryAPI>('/analyze', {
     method: 'POST',
     body: JSON.stringify({
-      image_name: imageName,
+      repo_url: imageName,
       scan_type: scanType,
+      target_type: 'docker',
     }),
   });
 }
@@ -296,8 +306,8 @@ export function pollAnalysisStatus(
       
       callbacks.onProgress?.(progress);
 
-      if (progress.status === 'done') {
-        // Récupérer le détail complet
+      if (progress.status === 'done' || progress.status === 'incomplete') {
+        // Récupérer le détail complet (même pour incomplete — résultats partiels disponibles)
         const detail = await getAnalysis(analysisId);
         callbacks.onDone?.(detail);
         return; // arrêt du polling
@@ -367,11 +377,11 @@ function mapDepStatus(
   return 'ok';
 }
 
-/** Convertit un score numérique en status global */
+/** Convertit un score numérique en status global — seuils alignés avec le backend */
 function mapScore(score: number | null): 'ok' | 'warn' | 'danger' {
-  const s = score ?? 0;
-  if (s >= 70) return 'ok';
-  if (s >= 50) return 'warn';
+  if (score === null) return 'danger'; // score null = échec ou incomplet
+  if (score >= 70) return 'ok';
+  if (score >= 50) return 'warn';
   return 'danger';
 }
 
@@ -379,7 +389,10 @@ function mapScore(score: number | null): 'ok' | 'warn' | 'danger' {
  * Convertit une AnalysisDetailAPI en ScanResult (format attendu par ScanPage).
  */
 export function analysisToScanResult(analysis: AnalysisDetailAPI): import('../pages/ScanPage').ScanResult {
-  const score = Math.round(analysis.security_score ?? 0);
+  // CRITIQUE : ne jamais afficher 0 si le score est null (FAILED/INCOMPLETE)
+  // On garde null pour que le UI affiche l'état réel
+  const scoreRaw = analysis.security_score;
+  const score = scoreRaw !== null && scoreRaw !== undefined ? Math.round(scoreRaw) : null;
 
   // Stats
   const totalVulns = analysis.dependencies.reduce(
@@ -396,21 +409,26 @@ export function analysisToScanResult(analysis: AnalysisDetailAPI): import('../pa
 
   const isDocker = analysis.target_type === 'docker';
 
+  // Coverage
+  const depsDetected = analysis.deps_detected ?? analysis.dependencies_total_count ?? analysis.dependencies.length;
+  const depsAnalyzed = analysis.deps_analyzed ?? analysis.dependencies_scanned_count ?? analysis.dependencies.length;
+  const coveragePct  = analysis.coverage_percent ?? (depsDetected > 0 ? Math.round((depsAnalyzed / depsDetected) * 100) : null);
+
   const stats = isDocker
     ? [
         { label: 'Vulnérabilités totales', value: String(analysis.docker_result?.vulnerabilities_count ?? totalVulns) },
         { label: 'CVE Critiques',          value: String(criticalVulns) },
-        { label: 'Score image Docker',     value: `${Math.round(analysis.docker_result?.image_score ?? 0)}/100` },
-        { label: 'Dépendances analysées',  value: String(analysis.dependencies.length) },
+        { label: 'Score image Docker',     value: analysis.docker_result ? `${Math.round(analysis.docker_result.image_score)}/100` : 'N/A' },
+        { label: 'Dépendances analysées',  value: String(depsAnalyzed) },
       ]
     : [
         { label: 'Vulnérabilités totales', value: String(totalVulns) },
         { label: 'CVE Critiques',          value: String(criticalVulns) },
-        { label: 'Dépendances analysées',  value: String(analysis.dependencies.length) },
-        { label: 'Dépendances à risque',   value: String(analysis.dependencies.filter((d) => d.vulnerabilities.length > 0 || d.is_outdated).length) },
+        { label: 'Dépendances détectées',  value: String(depsDetected) },
+        { label: 'Dépendances analysées',  value: String(depsAnalyzed) + (coveragePct !== null ? ` (${coveragePct}%)` : '') },
       ];
 
-  // Vulnérabilités (tous les CVE de toutes les dépendances)
+  // Vulnérabilités — enrichies avec EPSS, CWE, fixed_version, source
   const vulns = analysis.dependencies.flatMap((dep) =>
     dep.vulnerabilities.map((v) => ({
       id: v.cve_id,
@@ -418,6 +436,11 @@ export function analysisToScanResult(analysis: AnalysisDetailAPI): import('../pa
       pkg: `${dep.name}@${dep.version}`,
       desc: v.description,
       score: v.cvss_score || 0,
+      fixed_version: v.fixed_version ?? null,
+      epss_score: v.epss_score ?? null,
+      cwe: v.cwe ?? null,
+      exploit_available: v.exploit_available,
+      cvss_source: v.cvss_source,
     })),
   );
 
@@ -433,7 +456,7 @@ export function analysisToScanResult(analysis: AnalysisDetailAPI): import('../pa
     ? analysis.recommendations.map((r) => r.recommendation_text).join('\n\n')
     : 'Aucune recommandation générée.';
 
-  // Docker config (approximation à partir des données backend)
+  // Docker config
   const dockerConfig = analysis.docker_result
     ? {
         ports: [],
@@ -446,13 +469,18 @@ export function analysisToScanResult(analysis: AnalysisDetailAPI): import('../pa
   return {
     target: analysis.repo_url,
     type: isDocker ? 'docker' : 'github',
-    score,
-    status: mapScore(score),
+    score: score ?? 0,           // score 0 uniquement pour le composant circulaire
+    status: mapScore(scoreRaw ?? null),
     stats,
     vulns,
     deps,
     aiRec,
     dockerConfig,
     analysisId: analysis.id,
+    commit_sha: analysis.commit_sha ?? undefined,
+    coverage_percent: coveragePct ?? undefined,
+    analysisStatus: analysis.status,
+    // Conserver le score brut null pour les contrôles d'affichage
+    scoreIsNull: scoreRaw === null || scoreRaw === undefined,
   };
 }

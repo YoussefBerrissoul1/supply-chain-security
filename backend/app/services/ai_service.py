@@ -1,11 +1,18 @@
 """
 Service IA — génère des recommandations de sécurité personnalisées pour une analyse.
-Utilise Gemini API comme fournisseur principal, OpenRouter en fallback,
-et dispose d'un système de repli statique (rule-based) si aucun service n'est accessible.
+Stratégie de fallback (Gemini → NVIDIA NIM / Kimi K2.6 → OpenRouter → Statique) :
+  1. Gemini (principal — gemini-2.5-flash)
+  2. NVIDIA NIM / Kimi K2.6 (fallback intermédiaire — moonshotai/kimi-k2.6)
+  3. OpenRouter (dernier fallback LLM)
+  4. Système expert statique (rule-based — toujours disponible)
+
+L'IA NE participe PAS à la détection des CVE ni au Security Score (déterministe).
+Son rôle est uniquement l'interprétation et les recommandations.
 """
 
 import json
 import logging
+import time
 import httpx
 from google import genai
 from sqlalchemy.orm import Session
@@ -49,7 +56,7 @@ def generate_recommendations(
             "Obtenez une vraie clé sur https://aistudio.google.com/app/apikey"
         )
 
-    # Étape 1 : Essayer Gemini en priorité (seulement si clé valide)
+    # ── Étape 1 : Gemini (fournisseur principal) ──────────────────────────────
     if gemini_key_valid:
         try:
             recommendations_data = _generate_with_gemini(score_result, cve_results, repo_name, ecosystems, total_deps)
@@ -61,17 +68,31 @@ def generate_recommendations(
     else:
         logger.info("Gemini ignoré (clé absente ou invalide) — passage au fallback suivant")
 
-    # Étape 2 : Si Gemini n'a rien retourné, essayer OpenRouter
+    # ── Étape 2 : NVIDIA NIM / Kimi K2.6 (fallback intermédiaire) ────────────
+    # Appelé uniquement si Gemini a échoué ou n'est pas configuré
+    nvidia_key = settings.NVIDIA_API_KEY or ""
+    if not recommendations_data and nvidia_key:
+        try:
+            recommendations_data = _generate_with_nvidia(score_result, cve_results, repo_name, ecosystems, total_deps)
+            provider = "nvidia_kimi_k2"
+            logger.info("Recommandations générées avec succès via NVIDIA NIM / Kimi K2.6 (%d recs)", len(recommendations_data))
+        except Exception as e:
+            logger.error("Échec de la génération avec NVIDIA NIM : %s", e)
+            recommendations_data = []
+    elif not recommendations_data and not nvidia_key:
+        logger.info("NVIDIA NIM ignoré (NVIDIA_API_KEY absente) — passage à OpenRouter")
+
+    # ── Étape 3 : OpenRouter (dernier fallback LLM) ───────────────────────────
     if not recommendations_data and settings.OPENROUTER_API_KEY:
         try:
             recommendations_data = _generate_with_openrouter(score_result, cve_results, repo_name, ecosystems, total_deps)
             provider = "openrouter"
-            logger.info("Recommandations générées avec succès via OpenRouter (qwen3-coder) (%d recs)", len(recommendations_data))
+            logger.info("Recommandations générées avec succès via OpenRouter (%d recs)", len(recommendations_data))
         except Exception as e:
             logger.error("Échec de la génération avec OpenRouter : %s", e)
             recommendations_data = []
 
-    # Étape 3 : Dernier recours — système expert statique
+    # ── Étape 4 : Fallback statique (toujours disponible) ────────────────────
     if not recommendations_data:
         logger.warning("Aucune IA disponible. Utilisation du fallback statique.")
         provider = "static_fallback"
@@ -249,6 +270,161 @@ def _generate_with_gemini(
         raise ValueError("Gemini a retourné un JSON vide ou invalide")
 
     return result
+
+
+def _generate_with_nvidia(
+    score_result: ScoreResult,
+    cve_results: dict[str, list[VulnerabilityResult]],
+    repo_name: str = "inconnu",
+    ecosystems: list[str] | None = None,
+    total_deps: int = 0,
+) -> list[dict]:
+    """
+    Appelle l'API NVIDIA NIM (OpenAI-compatible) avec le modèle moonshotai/kimi-k2.6.
+
+    Endpoint : POST https://integrate.api.nvidia.com/v1/chat/completions
+    Auth      : Bearer ${NVIDIA_API_KEY}   ← jamais loggée
+    Timeout   : 60 secondes
+    Retries   : 2 tentatives en cas de 429 ou 5xx
+
+    Cette fonction ne participe PAS à la détection CVE ni au Security Score.
+    Elle génère uniquement des recommandations textuelles basées sur les résultats.
+
+    Paramètres :
+        score_result : résultat du scoring (score, pénalités, etc.)
+        cve_results  : dict des vulnérabilités par dépendance
+        repo_name    : nom du dépôt analysé
+        ecosystems   : écosystèmes détectés (Python, Node.js, etc.)
+        total_deps   : nombre total de dépendances analysées
+
+    Retourne :
+        list[dict] avec clés "target_type" et "recommendation_text"
+
+    Lève :
+        Exception si l'API est inaccessible après tous les retries
+    """
+    NVIDIA_API_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
+    NVIDIA_MODEL   = "moonshotai/kimi-k2.6"  # Modèle confirmé par l'utilisateur
+    TIMEOUT        = 60  # secondes — raisonnable pour un modèle LLM
+    MAX_RETRIES    = 2
+
+    # Construction du prompt — contexte compact (0.5 performance)
+    # On n'envoie que les informations PERTINENTES, pas tout le dump JSON
+    prompt = _build_prompt(score_result, cve_results, repo_name, ecosystems, total_deps)
+
+    headers = {
+        # La clé est transmise mais JAMAIS loggée (même en DEBUG)
+        "Authorization": f"Bearer {settings.NVIDIA_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    payload = {
+        "model": NVIDIA_MODEL,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Tu es un expert en cybersécurité spécialisé en Software Supply Chain Security. "
+                    "Tu réponds UNIQUEMENT avec du JSON valide (tableau), sans aucun texte avant ou après."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.6,
+        "top_p": 0.9,
+        "max_tokens": 2048,
+        "stream": False,  # Pas de streaming — réponse complète attendue
+    }
+
+    last_error: Exception | None = None
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            with httpx.Client(timeout=TIMEOUT) as client:
+                response = client.post(NVIDIA_API_URL, json=payload, headers=headers)
+
+            # ── Gestion des codes d'erreur spécifiques ────────────────────────
+            if response.status_code == 401:
+                # Clé invalide — pas de retry inutile, on lève immédiatement
+                raise PermissionError(
+                    "NVIDIA NIM : clé API invalide (401). "
+                    "Vérifiez NVIDIA_API_KEY dans votre .env"
+                )
+
+            if response.status_code == 429:
+                # Rate-limit — on attend avant de réessayer
+                wait = 8 * attempt  # 8s, 16s
+                logger.warning(
+                    "[NVIDIA] Rate-limit 429 — attente %ds (tentative %d/%d)",
+                    wait, attempt, MAX_RETRIES
+                )
+                time.sleep(wait)
+                last_error = Exception(f"NVIDIA NIM rate-limit 429 (tentative {attempt})")
+                continue
+
+            if response.status_code >= 500:
+                # Erreur serveur NVIDIA — retry
+                logger.warning(
+                    "[NVIDIA] Erreur serveur %d (tentative %d/%d)",
+                    response.status_code, attempt, MAX_RETRIES
+                )
+                time.sleep(5 * attempt)
+                last_error = Exception(f"NVIDIA NIM erreur serveur {response.status_code}")
+                continue
+
+            response.raise_for_status()
+
+            # ── Parser la réponse ──────────────────────────────────────────────
+            data = response.json()
+            choices = data.get("choices", [])
+            if not choices:
+                raise ValueError("NVIDIA NIM : réponse vide (aucun choix retourné)")
+
+            raw_text = choices[0].get("message", {}).get("content", "").strip()
+            if not raw_text:
+                raise ValueError("NVIDIA NIM : contenu vide dans la réponse")
+
+            # Nettoyer les éventuels blocs markdown
+            clean_text = _clean_json_response(raw_text)
+
+            result = json.loads(clean_text)
+            if not isinstance(result, list) or len(result) == 0:
+                raise ValueError("NVIDIA NIM : JSON retourné vide ou invalide")
+
+            logger.info(
+                "[NVIDIA] Kimi K2.6 a généré %d recommandation(s) avec succès",
+                len(result)
+            )
+            return result
+
+        except PermissionError:
+            # 401 — on remonte immédiatement sans retry
+            raise
+
+        except httpx.TimeoutException:
+            logger.warning(
+                "[NVIDIA] Timeout (%ds) sur la tentative %d/%d",
+                TIMEOUT, attempt, MAX_RETRIES
+            )
+            last_error = TimeoutError(f"NVIDIA NIM timeout après {TIMEOUT}s")
+            if attempt < MAX_RETRIES:
+                time.sleep(3)
+
+        except json.JSONDecodeError as e:
+            logger.warning("[NVIDIA] JSON invalide dans la réponse : %s", e)
+            last_error = e
+            break  # JSON invalide = pas la peine de réessayer
+
+        except Exception as e:
+            logger.warning("[NVIDIA] Erreur inattendue (tentative %d/%d) : %s", attempt, MAX_RETRIES, e)
+            last_error = e
+            if attempt < MAX_RETRIES:
+                time.sleep(3)
+
+    raise Exception(
+        f"NVIDIA NIM / Kimi K2.6 indisponible après {MAX_RETRIES} tentatives. "
+        f"Dernière erreur : {last_error}"
+    )
 
 
 def _generate_with_openrouter(

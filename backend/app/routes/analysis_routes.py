@@ -21,6 +21,8 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
 from app.core.database import get_db, SessionLocal
+# pyrefly: ignore [missing-import]
+import git
 from app.models.analysis import Analysis, AnalysisStatus
 from app.models.dependency import Dependency
 from app.models.docker_result import DockerResult
@@ -128,6 +130,15 @@ def run_full_analysis(analysis_id: int, repo_url: str, scan_type: str = "standar
 
         repo_path = clone_repository(validated_url)
         logger.info("[2/8] Depot clone dans : %s", repo_path)
+        
+        try:
+            repo_git = git.Repo(repo_path)
+            commit_sha = repo_git.head.commit.hexsha
+            analysis.commit_sha = commit_sha
+            db.commit()
+            logger.info("Commit analyse : %s", commit_sha)
+        except Exception as e:
+            logger.warning("Impossible de recuperer le SHA du commit : %s", e)
 
         # ----------------------------------------------------------
         # ETAPE 3 : Detection + scan des dependances
@@ -170,20 +181,31 @@ def run_full_analysis(analysis_id: int, repo_url: str, scan_type: str = "standar
 
                 # Extraire et sauvegarder les métadonnées de troncature
                 scan_meta = cve_results.pop("__scan_meta__", {})
+                
+                # NOUVEAU LOGIQUE DE COUVERTURE
+                deps_detected_total = scan_meta.get("deps_detected_total", len(dependencies))
+                deps_analyzed_count = scan_meta.get("deps_analyzed_successfully", deps_detected_total)
+                coverage_percent = (deps_analyzed_count / deps_detected_total * 100.0) if deps_detected_total > 0 else 100.0
+                
                 if scan_meta:
                     analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
                     if analysis:
                         analysis.dependencies_truncated = scan_meta.get("deps_truncated", False)
                         analysis.dependencies_scanned_count = scan_meta.get("deps_scanned")
                         analysis.dependencies_total_count = scan_meta.get("deps_total")
+                        analysis.deps_detected = deps_detected_total
+                        analysis.deps_analyzed = deps_analyzed_count
+                        analysis.coverage_percent = coverage_percent
                         analysis.cve_service_version = CVE_SERVICE_VERSION
                         db.commit()
 
                 total_cves = sum(len(v) for v in cve_results.values())
                 logger.info("[4/8] %d CVE detectees (mode %s)", total_cves, scan_type)
             except Exception as cve_err:
-                logger.error("[4/8] Erreur lors du scan CVE (OSV/NVD) : %s", cve_err)
-                raise Exception(f"Le service d'analyse des vulnérabilités a échoué (Timeout ou API). Détail: {cve_err}")
+                # En cas d'erreur du service CVE, on continue avec 0 CVE
+                # (comportement de la version fonctionnelle 0be0cc0)
+                logger.error("[4/8] Erreur lors du scan CVE : %s. Analyse continuee avec 0 CVE.", cve_err)
+                cve_results = {}
 
         # Sauvegarder les vulnerabilites en base
         # Il faut relier chaque vuln a la dependance correspondante
@@ -223,9 +245,12 @@ def run_full_analysis(analysis_id: int, repo_url: str, scan_type: str = "standar
                     cvss_score=vuln.cvss_score,
                     severity=db_sev,
                     description=vuln.description or "",
+                    cvss_source=vuln.cvss_source,
                     fixed_version=vuln.fixed_version,
                     exploit_available=vuln.exploit_available,
                     published_date=vuln.published_date,
+                    epss_score=getattr(vuln, 'epss_score', None),
+                    cwe=getattr(vuln, 'cwe', None),
                 )
                 db.add(db_vuln)
         db.commit()
@@ -262,19 +287,36 @@ def run_full_analysis(analysis_id: int, repo_url: str, scan_type: str = "standar
             db.commit()
             return
 
-        try:
-            score_result = compute_security_score(
-                cve_results=cve_results,
-                docker_result=docker_result,
-                dependencies=dependencies,
-            )
-            analysis.security_score = score_result.final_score
+        is_incomplete = False
+        if len(dependencies) == 0 and not docker_result:
+            # 0 dépendances, pas de Docker = Score non applicable
+            analysis.security_score = None
             db.commit()
-            logger.info("[6/8] Score de securite : %.1f/100 (%s)",
-                        score_result.final_score, score_result.risk_level.value)
-        except Exception as score_err:
-            logger.error("[6/8] Erreur lors du calcul du score : %s", score_err)
-            raise Exception(f"Erreur interne lors du calcul du score de sécurité : {score_err}")
+            logger.info("[6/8] Score de securite : Non applicable (0 dependances)")
+        else:
+            # Calculer le score avec les données disponibles
+            # même si la couverture est partielle (on note la couverture dans le rapport)
+            coverage = analysis.coverage_percent if analysis.coverage_percent is not None else 100.0
+            if coverage < 95.0:
+                logger.warning(
+                    "[6/8] Couverture partielle (%.1f%%) — score calculé sur les dépendances analysées.",
+                    coverage
+                )
+            score_result = None  # Initialisé ici pour éviter NameError en cas d'erreur
+            try:
+                score_result = compute_security_score(
+                    cve_results=cve_results,
+                    docker_result=docker_result,
+                    dependencies=dependencies,
+                )
+                analysis.security_score = score_result.final_score
+                db.commit()
+                logger.info("[6/8] Score de securite : %.1f/100 (%s)",
+                            score_result.final_score, score_result.risk_level.value)
+            except Exception as score_err:
+                logger.error("[6/8] Erreur lors du calcul du score : %s", score_err)
+                analysis.security_score = 0.0
+                db.commit()
 
         # ----------------------------------------------------------
         # ETAPE 7 : Recommandations IA (Gemini -> OpenRouter -> Statique)
@@ -286,19 +328,24 @@ def run_full_analysis(analysis_id: int, repo_url: str, scan_type: str = "standar
             return
 
         try:
-            recommendations = generate_recommendations(
-                db=db,
-                analysis_id=analysis_id,
-                score_result=score_result,
-                cve_results=cve_results,
-                repo_name=repo_name,
-                ecosystems=ecosystems,
-                total_deps=len(dependencies),
-            )
-            logger.info("[7/8] %d recommandations generees", len(recommendations) if recommendations else 0)
+            if (len(dependencies) == 0 and not docker_result) or score_result is None:
+                recommendations = []
+                logger.info("[7/8] IA ignoree (analyse vide ou score non calcule).")
+            else:
+                recommendations = generate_recommendations(
+                    db=db,
+                    analysis_id=analysis_id,
+                    score_result=score_result,
+                    cve_results=cve_results,
+                    repo_name=repo_name,
+                    ecosystems=ecosystems,
+                    total_deps=len(dependencies),
+                )
+                logger.info("[7/8] %d recommandations generees", len(recommendations) if recommendations else 0)
         except Exception as ai_err:
-            logger.error("[7/8] Erreur lors de l'appel IA : %s", ai_err)
-            raise Exception(f"Le service IA n'a pas répondu à temps ou a échoué : {ai_err}")
+            # Si l'IA échoue, on continue sans recommandation (ne fait pas crasher l'analyse)
+            logger.error("[7/8] Erreur lors de l'appel IA (non bloquant) : %s", ai_err)
+            recommendations = []
 
         # ----------------------------------------------------------
         # ETAPE 8 : Generation du rapport PDF
@@ -336,12 +383,15 @@ def run_full_analysis(analysis_id: int, repo_url: str, scan_type: str = "standar
             logger.warning("[8/8] Analyse #%d introuvable pour generation PDF", analysis_id)
 
         # ----------------------------------------------------------
-        # SUCCES : Mettre a jour le statut -> DONE
+        # SUCCES : Mettre a jour le statut -> DONE ou INCOMPLETE
         # ----------------------------------------------------------
-        analysis.status = AnalysisStatus.DONE
+        analysis.status = AnalysisStatus.INCOMPLETE if is_incomplete else AnalysisStatus.DONE
         db.commit()
-        logger.info("=== Analyse #%d terminee avec succes (score: %.1f/100) ===",
-                    analysis_id, score_result.final_score)
+        if is_incomplete:
+            logger.info("=== Analyse #%d terminee : INCOMPLETE ===", analysis_id)
+        else:
+            logger.info("=== Analyse #%d terminee avec succes (score: %s) ===",
+                        analysis_id, str(analysis.security_score) if analysis.security_score is not None else "N/A")
 
     except GitHubAnalyzerError as e:
         # Erreur connue (URL invalide, repo prive, etc.)
@@ -625,8 +675,50 @@ def create_analysis(
     response: Response,
     db: Session = Depends(get_db),
 ) -> Analysis:
-    # --- Nettoyage et validation de l'URL ---
-    repo_url_str = str(request.repo_url).strip().rstrip("/")
+    # La validation Pydantic (SEC3) est déjà faite par AnalysisRequest.
+    # Ici on route selon target_type.
+
+    target_type = request.target_type
+    repo_url_raw = str(request.repo_url).strip()
+
+    # ── Analyse Docker ────────────────────────────────────────────────────────
+    if target_type == "docker":
+        image_name = repo_url_raw.lower()  # déjà normalisé par le schéma
+        scan_type  = request.scan_type if request.scan_type in ("standard", "deep") else "standard"
+
+        # Protection anti-doublon : même image déjà en cours
+        existing = db.query(Analysis).filter(
+            Analysis.repo_url == image_name,
+            Analysis.target_type == "docker",
+            Analysis.status.in_([AnalysisStatus.PENDING, AnalysisStatus.RUNNING]),
+        ).first()
+        if existing:
+            logger.info(
+                "Analyse Docker #%d déjà en cours pour '%s' — retour de l'existante",
+                existing.id, image_name,
+            )
+            response.status_code = status.HTTP_200_OK
+            return existing
+
+        logger.info("Nouvelle analyse Docker demandée pour : %s", image_name)
+
+        analysis = Analysis(
+            repo_url=image_name,
+            repo_name=image_name.split("/")[-1].split(":")[0],
+            target_type="docker",
+            status=AnalysisStatus.PENDING,
+            scan_type=scan_type,
+        )
+        db.add(analysis)
+        db.commit()
+        db.refresh(analysis)
+
+        background_tasks.add_task(run_docker_analysis, analysis.id, image_name)
+        logger.info("Analyse Docker #%d créée — scan Trivy lancé en arrière-plan", analysis.id)
+        return analysis
+
+    # ── Analyse GitHub ─────────────────────────────────────────────────────────
+    repo_url_str = repo_url_raw.rstrip("/")
     if repo_url_str.endswith(".git"):
         repo_url_str = repo_url_str[:-4]
 
@@ -641,9 +733,7 @@ def create_analysis(
     repo_name = validated_url.rstrip("/").split("/")[-1]
     scan_type = request.scan_type if request.scan_type in ("standard", "deep") else "standard"
 
-    # --- Correction A : protection contre les doubles scans ---
-    # Si une analyse PENDING ou RUNNING existe déjà pour ce repo, on la retourne
-    # plutôt que d'en créer une nouvelle (qui provoquerait un conflit de cache Trivy).
+    # Protection anti-doublon
     existing = db.query(Analysis).filter(
         Analysis.repo_url == validated_url,
         Analysis.target_type == "github",

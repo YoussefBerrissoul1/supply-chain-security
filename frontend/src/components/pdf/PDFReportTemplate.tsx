@@ -39,7 +39,7 @@ export function PDFReportTemplate({ data }: PDFReportTemplateProps) {
     <div className="bg-[#e4e7f0] flex flex-col items-center p-8 gap-8 font-sans antialiased pdf-report-container">
       {/* Page 1: Cover */}
       <div className="relative shadow-2xl pdf-page-element">
-        <ReportCover repoUrl={data.target} />
+        <ReportCover data={data} />
       </div>
 
       {/* Page 2: Overview */}

@@ -21,6 +21,7 @@ class AnalysisStatus(str, enum.Enum):
     DONE = "done"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    INCOMPLETE = "incomplete"
 
 
 class Analysis(Base):
@@ -57,6 +58,10 @@ class Analysis(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
+    # --- Point 1 : SHA du Commit ---
+    # Permet de lier strictement l'analyse à une version exacte du code.
+    commit_sha: Mapped[str | None] = mapped_column(String(40), nullable=True, default=None)
+
     # --- Point 2 : Traçabilité du moteur CVE ---
     # Permet de détecter les analyses produites par une ancienne version du moteur
     # (scores CVSS figés, exploits non détectés, etc.) et de les re-scanner.
@@ -65,11 +70,17 @@ class Analysis(Base):
         String(20), nullable=True, default=None
     )
 
-    # --- Point 4 : Informations de troncature ---
+    # --- Point 4 : Informations de troncature et Qualité d'analyse ---
     # Affichées dans le rapport : "Scan partiel : 100/174 dépendances analysées"
     dependencies_truncated: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", nullable=False
     )
+    # Qualité d'analyse (nouvelle archi multi-sources)
+    deps_detected: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    deps_analyzed: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    coverage_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
+    
+    # Conservation pour rétrocompatibilité (peuvent être fusionnés avec deps_detected plus tard)
     dependencies_scanned_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     dependencies_total_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
 

@@ -2,6 +2,8 @@
 Configuration centralisée de l'application.
 Lit les variables depuis le fichier .env via Pydantic BaseSettings.
 """
+import os
+import requests
 
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -52,6 +54,10 @@ class Settings(BaseSettings):
     # --- IA ---
     GEMINI_API_KEY: str = ""
     OPENROUTER_API_KEY: str = ""
+    # NVIDIA NIM : clé API pour Kimi K2.6 (fallback Gemini → NVIDIA → OpenRouter)
+    # Obtenir sur : https://integrate.api.nvidia.com
+    # Format : nvapi-xxxxxxxxxxxxxxxxxxxx
+    NVIDIA_API_KEY: str = ""
     AI_PROVIDER: str = "gemini"     # "gemini" ou "openrouter"
 
     # --- Rapports ---

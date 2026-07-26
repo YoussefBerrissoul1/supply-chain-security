@@ -268,41 +268,48 @@ def _compute_cve_penalties(
                     break
 
         # 2. Multiplicateur d'exploitabilité
+        # FIX1: Suppression du multiplicateur fixed_version qui AGGRAVAIT
+        # la pénalité si un patch existait — logique inversée corrigée.
+        # Un patch disponible = solution connue, pas un risque aggravé.
         exploit_mult = 1.0
+
+        # Exploit confirmé (CISA KEV ou référence publique)
         if vuln.exploit_available:
             exploit_mult *= 1.5
 
+        # FIX3: EPSS — probabilité d'exploitation réelle dans les 30 jours
+        # Source: FIRST.org EPSS API (intégrée dans NVD Provider)
+        epss = getattr(vuln, 'epss_score', None)
+        if epss is not None:
+            if epss >= 0.7:    # Très haute probabilité d'exploitation
+                exploit_mult *= 1.3
+            elif epss >= 0.4:  # Probabilité modérée
+                exploit_mult *= 1.1
+
+        # CVE récente (<6 mois) → risque exploit augmenté
         age_months = None
         if vuln.published_date:
             try:
-                # format attendu: YYYY-MM-...
-                pub_year = int(vuln.published_date[:4])
+                pub_year  = int(vuln.published_date[:4])
                 pub_month = int(vuln.published_date[5:7])
-                # Date de référence du projet : juin 2026
-                age_months = (2026 - pub_year) * 12 + (6 - pub_month)
+                now = datetime.now(timezone.utc)
+                age_months = (now.year - pub_year) * 12 + (now.month - pub_month)
             except Exception:
                 pass
 
         if age_months is None and vuln.cve_id.startswith("CVE-"):
             try:
                 cve_year = int(vuln.cve_id.split("-")[1])
-                if cve_year == 2026:
-                    age_months = 3
-                else:
-                    age_months = (2026 - cve_year) * 12
+                now = datetime.now(timezone.utc)
+                age_months = (now.year - cve_year) * 12
             except Exception:
                 pass
 
-        if age_months is not None:
-            if age_months < 6:
-                exploit_mult *= 1.3
-            elif age_months > 24 and not vuln.fixed_version:
-                exploit_mult *= 1.2
-
-        if vuln.fixed_version and vuln.fixed_version != "unknown":
-            exploit_mult *= 1.4
+        if age_months is not None and age_months < 6:
+            exploit_mult *= 1.2  # CVE récente, exploit potentiel plus actif
 
         # 3. Multiplicateur d'impact
+        # Dépendance dev → risque réduit (pas en production)
         impact_mult = 0.5 if is_dev_dep else 1.3
 
         # Calcul final
@@ -312,6 +319,8 @@ def _compute_cve_penalties(
         category_text = f"CVE {vuln.severity.value} ({cve_id}) sur {dep_key}"
         if is_dev_dep:
             category_text += " [DEV]"
+        if getattr(vuln, 'exploit_available', False):
+            category_text += " [EXPLOIT CONNU]"
 
         penalties.append(PenaltyLine(
             category=category_text,
@@ -323,8 +332,9 @@ def _compute_cve_penalties(
         ))
 
         logger.info(
-            "Pénalité Matrix 3D pour %s : Base=%.1f × Exploit=%.2f × Impact=%.2f → -%.2f pts",
-            cve_id, base_penalty, exploit_mult, impact_mult, final_penalty
+            "Pénalité Matrix 3D pour %s : Base=%.1f × Exploit=%.2f × Impact=%.2f → -%.2f pts%s",
+            cve_id, base_penalty, exploit_mult, impact_mult, final_penalty,
+            f" [EPSS={epss:.2f}]" if epss is not None else ""
         )
 
     return penalties, counts, total_cve
@@ -417,59 +427,75 @@ def _compute_docker_penalties(
 # CALCUL DES PÉNALITÉS PACKAGES ABANDONNÉS
 # ==============================================================
 
-def _compute_abandoned_penalties(
-    dependencies: list[DependencyInfo],
+def _compute_unpatched_penalties(
+    cve_results: dict[str, list[VulnerabilityResult]],
 ) -> list[PenaltyLine]:
     """
-    Détecte les dépendances avec version trop ancienne.
+    FIX4 : Pénalité basée sur les CVE CRITICAL/HIGH sans version corrigée connue.
 
-    Note : sans accès aux dates de publication des packages (nécessite
-    des API supplémentaires comme PyPI JSON API ou npm registry),
-    on détecte l'obsolescence par des heuristiques sur les versions.
+    Logique : une CVE sans fixed_version signifie qu'il n'existe pas encore
+    de correctif officiel → risque aggravé car l'utilisateur ne peut pas se protéger
+    simplement en mettant à jour.
 
-    Heuristiques utilisées :
-        - Version 0.x.x → package en développement (risque élevé)
-        - Version majeure très basse vs taille du marché → potentiellement abandonné
-
-    Pour un PFE, cette pénalité est calculée mais basée sur is_outdated
-    qui sera mis à jour par la route /analyze lors de l'implémentation complète.
+    Ancienne logique (supprimée) : basée sur `is_outdated` / published_date des CVE
+    → c'était incorrect car published_date est la date de la FAILLE, pas du package.
 
     Paramètres :
-        dependencies : liste de DependencyInfo
+        cve_results : dict retourné par cve_service
 
     Retourne :
-        Liste de PenaltyLine (souvent vide à ce stade)
+        Liste de PenaltyLine (peut être vide)
     """
-    # Dans la version actuelle, is_outdated est False par défaut
-    # car la détection des dates de publication n'est pas encore implémentée
-    # Cette fonction est prête pour l'extension future
+    unpatched_critical = 0
+    unpatched_high = 0
 
-    abandoned_count = sum(
-        1 for dep in dependencies
-        if getattr(dep, "is_outdated", False)
-    )
+    seen_cves: set[str] = set()
+    for dep_key, vulns in cve_results.items():
+        if dep_key == "__scan_meta__":
+            continue
+        for vuln in vulns:
+            if vuln.cve_id in seen_cves:
+                continue
+            seen_cves.add(vuln.cve_id)
+            # CVE sans fixed_version = pas de patch disponible
+            has_fix = vuln.fixed_version and vuln.fixed_version not in ("unknown", "")
+            if not has_fix:
+                if vuln.severity.value == "CRITICAL":
+                    unpatched_critical += 1
+                elif vuln.severity.value == "HIGH":
+                    unpatched_high += 1
 
-    if abandoned_count == 0:
-        return []
+    penalties: list[PenaltyLine] = []
 
-    raw = abandoned_count * PENALTY_ABANDONED
-    applied = min(raw, CAP_ABANDONED)
+    if unpatched_critical > 0:
+        # 3 pts supplémentaires par CRITICAL sans patch (plafond 15)
+        raw = unpatched_critical * 3.0
+        applied = min(raw, 15.0)
+        penalties.append(PenaltyLine(
+            category=f"{unpatched_critical} CVE CRITICAL sans correctif disponible",
+            count=unpatched_critical,
+            unit_penalty=3.0,
+            raw_penalty=raw,
+            applied=applied,
+            cap=15.0,
+        ))
+        logger.info("Pénalité CVE CRITICAL sans patch : %d → -%.0f pts", unpatched_critical, applied)
 
-    penalty = PenaltyLine(
-        category=f"Packages abandonnes (> {PACKAGE_ABANDONED_MONTHS} mois sans mise a jour)",
-        count=abandoned_count,
-        unit_penalty=PENALTY_ABANDONED,
-        raw_penalty=raw,
-        applied=applied,
-        cap=CAP_ABANDONED,
-    )
+    if unpatched_high > 0:
+        # 1.5 pts supplémentaires par HIGH sans patch (plafond 9)
+        raw = unpatched_high * 1.5
+        applied = min(raw, 9.0)
+        penalties.append(PenaltyLine(
+            category=f"{unpatched_high} CVE HIGH sans correctif disponible",
+            count=unpatched_high,
+            unit_penalty=1.5,
+            raw_penalty=raw,
+            applied=applied,
+            cap=9.0,
+        ))
+        logger.info("Pénalité CVE HIGH sans patch : %d → -%.0f pts", unpatched_high, applied)
 
-    logger.info(
-        "Pénalité packages abandonnés : %d → -%.0f pts",
-        abandoned_count, applied,
-    )
-
-    return [penalty]
+    return penalties
 
 
 # ==============================================================
@@ -505,10 +531,11 @@ def compute_security_score(
     docker_penalties = _compute_docker_penalties(docker_result)
     all_penalties.extend(docker_penalties)
 
-    # --- Calcul pénalités packages abandonnés ---
-    dep_list = dependencies or []
-    abandoned_penalties = _compute_abandoned_penalties(dep_list)
-    all_penalties.extend(abandoned_penalties)
+    # --- Calcul pénalités CVE sans correctif (FIX4 — logique corrigée) ---
+    # Remplace l'ancienne pénalité "package abandonné" basée sur is_outdated
+    # (toujours False car published_date = date CVE, pas date package)
+    unpatched_penalties = _compute_unpatched_penalties(cve_results)
+    all_penalties.extend(unpatched_penalties)
 
     # --- Calcul du score final ---
     total_deduction = sum(p.applied for p in all_penalties)

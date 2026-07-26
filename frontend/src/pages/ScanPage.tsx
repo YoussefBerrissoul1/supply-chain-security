@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowRight, Download, RefreshCw, Clock, ChevronRight, Layers, Box, Server, HardDrive, History, Loader2, AlertCircle, Wifi, Shield } from 'lucide-react';
+import { ArrowRight, Download, RefreshCw, Clock, ChevronRight, Layers, Box, Server, HardDrive, History, Loader2, AlertCircle, Wifi, Shield, Copy, Check as CheckIcon } from 'lucide-react';
 import { MagneticButton } from '@/components/MagneticButton';
 import { RiskMatrix } from '@/components/RiskMatrix';
 import { generateReport } from '@/lib/pdf/generateReport';
+import { ScanTimeline, buildTimelineSteps } from '@/components/ScanTimeline';
+import { AnimatedScore } from '@/components/AnimatedScore';
 import {
   startGithubAnalysis,
   startDockerAnalysis,
@@ -31,10 +33,22 @@ export interface DockerConfig { ports: string[]; user: string; os: string; total
 export interface ScanResult {
   target: string;
   type: 'github' | 'docker';
-  score: number;
+  score: number;                    // 0 si scoreIsNull (ne pas afficher)
+  scoreIsNull?: boolean;            // true si le score backend est null (FAILED/INCOMPLETE)
   status: 'ok' | 'warn' | 'danger';
   stats: { label: string; value: string }[];
-  vulns: { id: string; severity: 'CRITIQUE' | 'HAUTE' | 'MOYENNE' | 'BASSE'; pkg: string; desc: string; score: number }[];
+  vulns: {
+    id: string;
+    severity: 'CRITIQUE' | 'HAUTE' | 'MOYENNE' | 'BASSE';
+    pkg: string;
+    desc: string;
+    score: number;
+    fixed_version?: string | null;
+    epss_score?: number | null;
+    cwe?: string | null;
+    exploit_available?: boolean;
+    cvss_source?: string;
+  }[];
   deps: { name: string; version: string; status: 'ok' | 'outdated' | 'vulnerable' }[];
   aiRec: string;
   dockerLayers?: DockerLayer[];
@@ -42,6 +56,9 @@ export interface ScanResult {
   date?: string;
   analysisId?: number;
   isHistorical?: boolean;
+  commit_sha?: string;
+  coverage_percent?: number;
+  analysisStatus?: string;
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -54,15 +71,25 @@ function detectInputType(val: string): InputType {
   return 'github';
 }
 
-function scoreColor(s: number) {
-  if (s >= 80) return '#15803d';
-  if (s >= 60) return '#b45309';
+function scoreColor(s: number, scoreIsNull?: boolean) {
+  if (scoreIsNull) return '#6b7280'; // gris — score indisponible
+  if (s >= 90) return '#15803d';
+  if (s >= 70) return '#16a34a';
+  if (s >= 50) return '#b45309';
+  if (s >= 30) return '#c2410c';
   return '#b91c1c';
 }
 
-function scoreLabel(s: number) {
-  if (s >= 80) return 'Statut OK';
-  if (s >= 60) return 'Attention requise';
+function scoreLabel(s: number, scoreIsNull?: boolean, analysisStatus?: string) {
+  if (scoreIsNull) {
+    if (analysisStatus === 'failed') return 'Échec du scan';
+    if (analysisStatus === 'incomplete') return 'Analyse incomplète';
+    return 'Non applicable';
+  }
+  if (s >= 90) return 'Excellent';
+  if (s >= 70) return 'Bon';
+  if (s >= 50) return 'Moyen';
+  if (s >= 30) return 'Mauvais';
   return 'Critique';
 }
 
@@ -276,6 +303,7 @@ function ScanForm({ onStart, onViewHistory, isSubmitting }: { onStart: (url: str
     ? backendHistory.slice(0, 4).map((s) => ({
       target: s.repo_url,
       score: Math.round(s.security_score ?? 0),
+      scoreIsNull: s.security_score === null,
       type: (s.target_type === 'docker' ? 'docker' : 'github') as 'github' | 'docker',
       date: timeAgo(s.created_at),
       status: s.status,
@@ -407,9 +435,14 @@ function ScanForm({ onStart, onViewHistory, isSubmitting }: { onStart: (url: str
                         {s.date}
                         {s.status === 'running' && <span className="text-[#b45309] font-semibold">En cours...</span>}
                         {s.status === 'failed' && <span className="text-[#b91c1c] font-semibold">Echec</span>}
+                        {s.status === 'incomplete' && <span className="text-[#b45309] font-semibold">Incomplet</span>}
                       </div>
                     </div>
-                    <div className="shrink-0 font-bold text-sm mr-2" style={{ color: scoreColor(s.score) }}>{s.status === 'done' ? `${s.score}/100` : '—'}</div>
+                    <div className="shrink-0 font-bold text-sm mr-2" style={{ color: scoreColor(s.score, (s as any).scoreIsNull) }}>
+                      {s.status === 'done' || s.status === 'incomplete'
+                        ? ((s as any).scoreIsNull ? 'N/A' : `${s.score}/100`)
+                        : '—'}
+                    </div>
                     {loadingHistoryId === s.analysisId ? (
                       <Loader2 size={14} className="text-[#c2410c] animate-spin" />
                     ) : (
@@ -435,6 +468,15 @@ function ScanProgress({ target, inputType, analysisId, onDone, onError }: { targ
   const startTime = useRef(Date.now());
   const isDocker = inputType === 'docker';
 
+  // Timeline state — déduit des données réelles de progression
+  const [hasStarted, setHasStarted] = useState(false);
+  const [depsFound, setDepsFound] = useState(0);
+  const [vulnsFound, setVulnsFound] = useState(0);
+  const [recsFound, setRecsFound] = useState(0);
+  const [isDone, setIsDone] = useState(false);
+
+  const timelineSteps = buildTimelineSteps({ isDocker, hasStarted, depsFound, vulnsFound, recsFound, isDone });
+
   useEffect(() => {
     const t = setInterval(() => setElapsed(Math.round((Date.now() - startTime.current) / 1000)), 1000);
     return () => clearInterval(t);
@@ -442,36 +484,40 @@ function ScanProgress({ target, inputType, analysisId, onDone, onError }: { targ
 
   useEffect(() => {
     let lastStatus = '';
-    let depsFound = 0;
-    let vulnsFound = 0;
 
     const cancel = pollAnalysisStatus(analysisId, {
       onProgress: (progress) => {
         const newLines: string[] = [];
         if (lastStatus !== progress.status) {
           if (progress.status === 'running') {
+            setHasStarted(true);
             newLines.push('[INFO] Analyse démarrée sur le serveur...');
             newLines.push(isDocker ? '[INFO] Connexion au registre Docker...' : '[INFO] Clonage du dépôt GitHub...');
           }
           lastStatus = progress.status;
         }
         if (progress.total_deps > depsFound) {
+          setDepsFound(progress.total_deps);
           newLines.push(`[INFO] ${progress.total_deps} dépendance(s) détectée(s)...`);
-          depsFound = progress.total_deps;
         }
         if (progress.total_vulns > vulnsFound) {
           const delta = progress.total_vulns - vulnsFound;
           const crit = progress.vulns_by_severity['CRITICAL'] ?? 0;
+          setVulnsFound(progress.total_vulns);
           newLines.push(`[WARN] ${delta} nouvelle(s) CVE détectée(s) — dont ${crit} CRITIQUE(S)`);
-          vulnsFound = progress.total_vulns;
         }
-        if (progress.total_recommendations > 0 && !visibleLines.some(l => l.includes('IA'))) {
-          newLines.push('[INFO] Génération des recommandations IA...');
+        if (progress.total_recommendations > 0) {
+          setRecsFound(progress.total_recommendations);
+          if (!visibleLines.some(l => l.includes('IA'))) {
+            newLines.push('[INFO] Génération des recommandations IA...');
+          }
         }
         if (newLines.length > 0) setVisibleLines((prev) => [...prev, ...newLines]);
       },
       onDone: (analysis) => {
-        setVisibleLines((prev) => [...prev, '[INFO] Calcul du score de sécurité...', '[INFO] Génération du rapport PDF...', `[OK] Analyse terminée — Score : ${Math.round(analysis.security_score ?? 0)}/100`]);
+        setIsDone(true);
+        const scoreDisp = analysis.security_score !== null ? `${Math.round(analysis.security_score ?? 0)}/100` : 'N/A';
+        setVisibleLines((prev) => [...prev, '[INFO] Calcul du score de sécurité...', '[INFO] Génération du rapport PDF...', `[OK] Analyse terminée — Score : ${scoreDisp}`]);
         setTimeout(() => {
           try {
             onDone(analysisToScanResult(analysis));
@@ -479,7 +525,7 @@ function ScanProgress({ target, inputType, analysisId, onDone, onError }: { targ
             console.error("Erreur lors de la conversion des résultats:", err);
             onError("Le scan est terminé mais les résultats n'ont pas pu être chargés.");
           }
-        }, 800);
+        }, 900);
       },
       onError: (msg) => {
         setVisibleLines((prev) => [...prev, `[ERREUR] ${msg}`]);
@@ -487,7 +533,8 @@ function ScanProgress({ target, inputType, analysisId, onDone, onError }: { targ
       },
     });
     return () => cancel();
-  }, [analysisId, isDocker, onDone, onError]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analysisId]);
 
   return (
     <div className="min-h-screen bg-[#f7f8fb] font-sans">
@@ -496,16 +543,16 @@ function ScanProgress({ target, inputType, analysisId, onDone, onError }: { targ
         <span className="text-[#e4e7f0]">/</span>
         <span className="text-[#4b4e5c] text-sm">Analyse en cours</span>
       </div>
-      <div className="max-w-3xl mx-auto px-6 py-16">
-        <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8 }}>
-          <div className="flex items-center justify-between mb-6">
+      <div className="max-w-5xl mx-auto px-6 py-12">
+        <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
+          <div className="flex items-center justify-between mb-8">
             <div>
               <h1 className="font-serif text-3xl font-bold text-[#12131a] mb-1">Analyse en cours…</h1>
               <div className="flex items-center gap-2">
                 <div className="shrink-0 w-5 h-5 rounded flex items-center justify-center" style={{ background: isDocker ? '#f0fdf4' : '#ffedd8' }}>
                   {isDocker ? <Layers className="w-3 h-3 text-[#15803d]" /> : <Box className="w-3 h-3 text-[#c2410c]" />}
                 </div>
-                <p className="text-sm font-mono text-[#8a8d9c]">{target}</p>
+                <p className="text-sm font-mono text-[#8a8d9c] truncate max-w-sm">{target}</p>
               </div>
             </div>
             <div className="text-right">
@@ -513,9 +560,16 @@ function ScanProgress({ target, inputType, analysisId, onDone, onError }: { targ
               <div className="text-xs text-[#8a8d9c]">Temps écoulé</div>
             </div>
           </div>
-          <TerminalPanel lines={visibleLines} showCursor />
+
+          {/* Layout 2 colonnes : timeline + terminal */}
+          <div className="grid grid-cols-1 md:grid-cols-[280px_1fr] gap-6">
+            <ScanTimeline steps={timelineSteps} />
+            <TerminalPanel lines={visibleLines} showCursor />
+          </div>
+
           <div className="mt-4 flex items-center gap-2 text-xs text-[#8a8d9c]">
             <Wifi className="w-3 h-3" />
+            <span>Connexion active — polling toutes les 2,5s</span>
           </div>
         </motion.div>
       </div>
@@ -536,6 +590,7 @@ function ScanResults({ result, onReset }: { result: ScanResult; onReset: () => v
   const [activeTab, setActiveTab] = useState<string>(tabs[0]);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [aiAnimationFinished, setAiAnimationFinished] = useState(result.isHistorical === true);
+  const [copiedSha, setCopiedSha] = useState(false);
 
   const stats = result.stats ?? [];
   const vulns = result.vulns ?? [];
@@ -547,6 +602,16 @@ function ScanResults({ result, onReset }: { result: ScanResult; onReset: () => v
     try { await generateReport(result); } finally { setIsGeneratingPdf(false); }
   };
 
+  const handleCopySha = () => {
+    if (!result.commit_sha) return;
+    navigator.clipboard.writeText(result.commit_sha).then(() => {
+      setCopiedSha(true);
+      setTimeout(() => setCopiedSha(false), 2000);
+    }).catch(() => {});
+  };
+
+  const coverageLow = result.coverage_percent !== undefined && result.coverage_percent < 95;
+
   return (
     <div className="min-h-screen bg-[#f7f8fb] font-sans">
       <div className="bg-white border-b border-[#e4e7f0] px-6 py-4 flex items-center gap-4">
@@ -555,18 +620,51 @@ function ScanResults({ result, onReset }: { result: ScanResult; onReset: () => v
         <span className="text-[#4b4e5c] text-sm font-mono truncate max-w-xs">{result.target}</span>
       </div>
 
-      <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }} className="bg-white border-b border-[#e4e7f0] px-6 py-8">
+      <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="bg-white border-b border-[#e4e7f0] px-6 py-8">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center gap-6">
           <div className="flex items-baseline gap-3">
-            <span className="font-mono font-bold leading-none" style={{ fontSize: 'clamp(3.5rem, 10vw, 7rem)', color: scoreColor(result.score) }}>{result.score}</span>
-            <span className="font-mono text-2xl text-[#8a8d9c]">/100</span>
+            <AnimatedScore
+              value={result.score}
+              isNull={result.scoreIsNull}
+              className="font-mono font-bold leading-none"
+              style={{ fontSize: 'clamp(3.5rem, 10vw, 7rem)', color: scoreColor(result.score, result.scoreIsNull) }}
+            />
+            {!result.scoreIsNull && <span className="font-mono text-2xl text-[#8a8d9c]">/100</span>}
           </div>
           <div className="flex flex-col gap-3">
-            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full font-bold text-sm border self-start" style={{ background: result.status === 'ok' ? '#dcfce7' : result.status === 'warn' ? '#fef3c7' : '#fee2e2', color: scoreColor(result.score), borderColor: `${scoreColor(result.score)}33` }}>
-              <motion.div className="w-2 h-2 rounded-full" style={{ background: scoreColor(result.score) }} animate={{ opacity: [1, 0.3, 1] }} transition={{ repeat: Infinity, duration: 2.4 }} />
-              {scoreLabel(result.score)}
+            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full font-bold text-sm border self-start" style={{ background: result.status === 'ok' ? '#dcfce7' : result.status === 'warn' ? '#fef3c7' : '#fee2e2', color: scoreColor(result.score, result.scoreIsNull), borderColor: `${scoreColor(result.score, result.scoreIsNull)}33` }}>
+              <motion.div className="w-2 h-2 rounded-full" style={{ background: scoreColor(result.score, result.scoreIsNull) }} animate={{ opacity: [1, 0.3, 1] }} transition={{ repeat: Infinity, duration: 2.4 }} />
+              {scoreLabel(result.score, result.scoreIsNull, result.analysisStatus)}
             </div>
-            <p className="text-sm text-[#4b4e5c] font-mono">{result.target}</p>
+            <p className="text-sm text-[#4b4e5c] font-mono truncate max-w-xs">{result.target}</p>
+            {/* Commit SHA avec bouton copy */}
+            {result.commit_sha && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-mono text-[#8a8d9c]">SHA:</span>
+                <span className="text-xs font-mono text-[#4b4e5c]">{result.commit_sha.slice(0, 10)}&hellip;</span>
+                <motion.button
+                  type="button"
+                  onClick={handleCopySha}
+                  whileTap={{ scale: 0.9 }}
+                  className="text-[#8a8d9c] hover:text-[#12131a] transition-colors"
+                  title="Copier le SHA"
+                >
+                  <AnimatePresence mode="wait">
+                    {copiedSha
+                      ? <motion.span key="ok" initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }}><CheckIcon size={12} className="text-[#15803d]" /></motion.span>
+                      : <motion.span key="copy" initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }}><Copy size={12} /></motion.span>
+                    }
+                  </AnimatePresence>
+                </motion.button>
+                {copiedSha && <motion.span initial={{ opacity: 0, x: -4 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }} className="text-[10px] text-[#15803d] font-semibold">Copié!</motion.span>}
+              </div>
+            )}
+            {/* Coverage warning */}
+            {coverageLow && (
+              <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="inline-flex items-center gap-1.5 text-xs text-[#b45309] bg-[#fef3c7] px-2.5 py-1 rounded-full border border-[#b45309]/20">
+                <span>⚠️</span> Couverture {result.coverage_percent}% — analyse partielle
+              </motion.div>
+            )}
           </div>
           <div className="md:ml-auto flex items-center gap-3">
             <button type="button" onClick={onReset} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-[#e4e7f0] text-sm text-[#4b4e5c] hover:border-[#12131a]/30 transition-all"><RefreshCw size={14} /> Nouvelle analyse</button>
@@ -596,7 +694,14 @@ function ScanResults({ result, onReset }: { result: ScanResult; onReset: () => v
               <div className="space-y-8">
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   {stats.map((s, i) => (
-                    <motion.div key={s.label} initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: i * 0.1 }} className="bg-white rounded-2xl border border-[#e4e7f0] p-6 shadow-sm">
+                    <motion.div
+                      key={s.label}
+                      initial={{ opacity: 0, y: 12 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: i * 0.08, duration: 0.4 }}
+                      whileHover={{ y: -3, boxShadow: '0 8px 24px -6px rgba(0,0,0,0.10)' }}
+                      className="bg-white rounded-2xl border border-[#e4e7f0] p-6 shadow-sm cursor-default transition-shadow"
+                    >
                       <div className="font-serif text-4xl font-bold text-[#12131a] mb-2">{s.value}</div>
                       <div className="text-sm text-[#4b4e5c]">{s.label}</div>
                     </motion.div>
@@ -611,35 +716,69 @@ function ScanResults({ result, onReset }: { result: ScanResult; onReset: () => v
 
             {activeTab === 'Vulnérabilités' && (
               <div className="bg-white rounded-2xl border border-[#e4e7f0] overflow-hidden shadow-sm">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-[#e4e7f0] bg-[#f7f8fb]">
-                      <th className="text-left px-6 py-3 font-semibold text-[#12131a]">CVE ID</th>
-                      <th className="text-left px-6 py-3 font-semibold text-[#12131a]">Sévérité</th>
-                      <th className="text-left px-6 py-3 font-semibold text-[#12131a]">Paquet</th>
-                      <th className="text-left px-6 py-3 font-semibold text-[#12131a] hidden md:table-cell">Description</th>
-                      <th className="text-right px-6 py-3 font-semibold text-[#12131a]">Score</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {vulns.map((v, i) => (
-                      <motion.tr key={v.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }} className="border-b border-[#e4e7f0] last:border-0">
-                        <td className="px-6 py-4 font-mono text-[#12131a]">{v.id}</td>
-                        <td className="px-6 py-4"><span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: `${severityColor(v.severity)}18`, color: severityColor(v.severity) }}>{v.severity}</span></td>
-                        <td className="px-6 py-4 font-mono text-xs text-[#4b4e5c]">{v.pkg}</td>
-                        <td className="px-6 py-4 text-[#4b4e5c] hidden md:table-cell">{v.desc}</td>
-                        <td className="px-6 py-4 text-right font-bold font-mono" style={{ color: severityColor(v.severity) }}>{v.score ? v.score.toFixed(1) : 'N/A'}</td>
-                      </motion.tr>
-                    ))}
-                  </tbody>
-                </table>
+                {vulns.length === 0 ? (
+                  <div className="px-8 py-12 text-center text-[#8a8d9c]">
+                    <Shield className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                    <p className="font-semibold">Aucune vulnérabilité détectée</p>
+                  </div>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-[#e4e7f0] bg-[#f7f8fb]">
+                        <th className="text-left px-6 py-3 font-semibold text-[#12131a]">CVE ID</th>
+                        <th className="text-left px-6 py-3 font-semibold text-[#12131a]">Sévérité</th>
+                        <th className="text-left px-6 py-3 font-semibold text-[#12131a]">Paquet</th>
+                        <th className="text-left px-6 py-3 font-semibold text-[#12131a] hidden md:table-cell">Correctif</th>
+                        <th className="text-right px-6 py-3 font-semibold text-[#12131a]">CVSS</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {vulns.map((v, i) => (
+                        <motion.tr key={`${v.id}-${i}`} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }} className="border-b border-[#e4e7f0] last:border-0 hover:bg-[#f7f8fb] transition-colors">
+                          <td className="px-6 py-4">
+                            <div className="font-mono text-xs text-[#12131a] font-bold">{v.id}</div>
+                            {/* CWE + EPSS sous le CVE ID */}
+                            <div className="flex items-center gap-2 mt-1 flex-wrap">
+                              {v.cwe && <span className="text-[10px] font-mono text-[#8a8d9c] bg-[#f7f8fb] border border-[#e4e7f0] px-1.5 py-0.5 rounded">{v.cwe}</span>}
+                              {v.epss_score !== null && v.epss_score !== undefined && (
+                                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded" style={{ background: v.epss_score >= 0.4 ? '#fee2e2' : '#f0fdf4', color: v.epss_score >= 0.4 ? '#b91c1c' : '#15803d' }}>
+                                  EPSS {(v.epss_score * 100).toFixed(1)}%
+                                </span>
+                              )}
+                              {v.exploit_available && (
+                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-[#fef2f2] text-[#b91c1c] border border-[#fecaca]">⚡ EXPLOIT</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4"><span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: `${severityColor(v.severity)}18`, color: severityColor(v.severity) }}>{v.severity}</span></td>
+                          <td className="px-6 py-4 font-mono text-xs text-[#4b4e5c] max-w-[140px] truncate">{v.pkg}</td>
+                          <td className="px-6 py-4 hidden md:table-cell">
+                            {v.fixed_version ? (
+                              <span className="text-xs text-[#15803d] font-mono font-semibold">→ v{v.fixed_version}</span>
+                            ) : (
+                              <span className="text-xs text-[#8a8d9c]">Aucun patch</span>
+                            )}
+                          </td>
+                          <td className="px-6 py-4 text-right font-bold font-mono" style={{ color: severityColor(v.severity) }}>{v.score ? v.score.toFixed(1) : 'N/A'}</td>
+                        </motion.tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
               </div>
             )}
 
             {activeTab === 'Dépendances' && (
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {deps.map((d, i) => (
-                  <motion.div key={d.name} initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.05 }} className="flex items-center gap-4 bg-white rounded-xl border border-[#e4e7f0] px-6 py-4 shadow-sm">
+                  <motion.div
+                    key={d.name}
+                    initial={{ opacity: 0, x: -12 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: i * 0.04, duration: 0.3 }}
+                    whileHover={{ x: 4, boxShadow: '0 4px 16px -4px rgba(0,0,0,0.08)' }}
+                    className="flex items-center gap-4 bg-white rounded-xl border border-[#e4e7f0] px-6 py-4 shadow-sm cursor-default"
+                  >
                     <span className="font-mono font-bold text-[#12131a]">{d.name}</span>
                     <span className="font-mono text-sm text-[#8a8d9c]">@{d.version}</span>
                     <span className="ml-auto text-xs font-bold px-2.5 py-1 rounded-full" style={{ background: d.status === 'ok' ? '#dcfce7' : d.status === 'outdated' ? '#fef3c7' : '#fee2e2', color: d.status === 'ok' ? '#15803d' : d.status === 'outdated' ? '#b45309' : '#b91c1c' }}>
@@ -713,7 +852,9 @@ function ScanResults({ result, onReset }: { result: ScanResult; onReset: () => v
                     </motion.div>
                     <motion.div variants={{ hidden: { opacity: 0, x: -10 }, visible: { opacity: 1, x: 0 } }} className="p-4 rounded-xl hover:bg-[#f7f8fb] transition-colors group">
                       <div className="text-[#8a8d9c] mb-1 group-hover:text-[#4b4e5c] transition-colors">Score</div>
-                      <div className="font-bold" style={{ color: scoreColor(result.score) }}>{result.score}/100</div>
+                      <div className="font-bold" style={{ color: scoreColor(result.score, result.scoreIsNull) }}>
+                        {result.scoreIsNull ? 'N/A' : `${result.score}/100`}
+                      </div>
                     </motion.div>
                     <motion.div variants={{ hidden: { opacity: 0, x: -10 }, visible: { opacity: 1, x: 0 } }} className="p-4 rounded-xl hover:bg-[#f7f8fb] transition-colors group">
                       <div className="text-[#8a8d9c] mb-1 group-hover:text-[#4b4e5c] transition-colors">CVE détectées</div>

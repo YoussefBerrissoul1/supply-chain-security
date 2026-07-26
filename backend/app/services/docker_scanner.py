@@ -328,7 +328,7 @@ def run_trivy_scan(image_name: str, scan_type: str = "standard") -> dict | None:
 
     logger.info("Lancement de Trivy sur l'image : %s (scan_type=%s)", image_name, scan_type)
 
-    # "standard" = vulns OS uniquement (rapide)
+    # "standard" = vulns OS + libraries (rapide, activé Q3)
     # "deep"     = vulns + secrets + misconfigs (plus long)
     scanners = "vuln" if scan_type == "standard" else "vuln,secret,misconfig"
 
@@ -342,10 +342,11 @@ def run_trivy_scan(image_name: str, scan_type: str = "standard") -> dict | None:
         "--skip-version-check",   # Évite les messages de mise à jour qui polluent le stdout JSON
         # Ces fichiers apt sont des listes de paquets disponibles, pas des paquets installés.
         # Ils sont très gros (10-20 Mo) et Trivy les scanne inutilement pour des secrets.
-        # Les vraies CVE sont détectées via les paquets système, pas ces fichiers de liste.
         "--skip-files", "/var/lib/apt/lists/*",
         "--skip-files", "/var/cache/apt/*",
         "--scanners", scanners,
+        # Q3 validé : scanner OS + libraries (Python pip, Node npm, Java jar, etc.)
+        "--pkg-types", "os,library",
         image_name,
     ]
 

@@ -70,26 +70,75 @@ def startup_event() -> None:
     else:
         logger.info("ℹ️ OPENROUTER_API_KEY non configurée — pas de fallback OpenRouter")
 
-    # Nettoyage automatique des analyses bloquées (timeout)
+    # ── F2 : Nettoyage des analyses bloquées au redémarrage ──────────────────
+    # Si Uvicorn redémarre pendant un scan (reload, crash), les analyses restent
+    # en RUNNING indéfiniment. On les marque toutes FAILED au démarrage.
     db = SessionLocal()
     try:
-        threshold = datetime.now(timezone.utc) - timedelta(minutes=15)
-        stale_analyses = db.query(Analysis).filter(
-            Analysis.status.in_([AnalysisStatus.PENDING, AnalysisStatus.RUNNING]),
-            Analysis.created_at < threshold
+        # 1) Toutes les analyses RUNNING → FAILED (interrompues par le redémarrage)
+        interrupted = db.query(Analysis).filter(
+            Analysis.status == AnalysisStatus.RUNNING
         ).all()
-        
-        if stale_analyses:
-            logger.warning("Nettoyage : %d analyse(s) bloquée(s) détectée(s) (dépassant 15min)", len(stale_analyses))
-            for stale in stale_analyses:
-                stale.status = AnalysisStatus.FAILED
-                # Pas de champ "error_message" dans la BDD donc on marque juste FAILED
-                logger.warning("Analyse #%d marquée comme expirée/FAILED", stale.id)
+
+        if interrupted:
+            logger.warning(
+                "[Startup] %d analyse(s) interrompue(s) par redémarrage → marquées FAILED",
+                len(interrupted)
+            )
+            for analysis in interrupted:
+                analysis.status = AnalysisStatus.FAILED
+                logger.warning(
+                    "[Startup] Analyse #%d (%s) → FAILED (interrompue)",
+                    analysis.id, analysis.repo_name or "?"
+                )
             db.commit()
+
+        # 2) Analyses PENDING depuis trop longtemps (> 30 min) → FAILED
+        threshold_pending = datetime.now(timezone.utc) - timedelta(minutes=30)
+        stale_pending = db.query(Analysis).filter(
+            Analysis.status == AnalysisStatus.PENDING,
+            Analysis.created_at < threshold_pending
+        ).all()
+
+        if stale_pending:
+            logger.warning(
+                "[Startup] %d analyse(s) PENDING > 30min → marquées FAILED",
+                len(stale_pending)
+            )
+            for analysis in stale_pending:
+                analysis.status = AnalysisStatus.FAILED
+            db.commit()
+
     except Exception as e:
-        logger.error("Erreur lors du nettoyage automatique : %s", e)
+        logger.error("[Startup] Erreur lors du nettoyage des analyses bloquées : %s", e)
     finally:
         db.close()
+
+    # ── F1 : Nettoyage des dossiers temporaires orphelins ────────────────────
+    # Si le bloc finally de cleanup_repository a échoué, des dossiers restent.
+    # On nettoie les dossiers de plus de 2h au démarrage.
+    import shutil
+    from pathlib import Path
+
+    try:
+        clone_dir = Path(settings.CLONE_DIRECTORY)
+        if clone_dir.exists():
+            now_ts = datetime.now(timezone.utc).timestamp()
+            orphan_count = 0
+            for repo_dir in clone_dir.iterdir():
+                if repo_dir.is_dir():
+                    age_seconds = now_ts - repo_dir.stat().st_mtime
+                    if age_seconds > 7200:  # > 2 heures
+                        try:
+                            shutil.rmtree(repo_dir, ignore_errors=True)
+                            orphan_count += 1
+                            logger.info("[Startup] Dossier orphelin supprimé : %s", repo_dir.name)
+                        except Exception:
+                            pass
+            if orphan_count:
+                logger.info("[Startup] %d dossier(s) temporaire(s) orphelin(s) nettoyé(s)", orphan_count)
+    except Exception as e:
+        logger.warning("[Startup] Nettoyage temp_repositories non critique : %s", e)
 
 
 # --- Point d'entrée pour exécution directe ---
