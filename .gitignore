@@ -79,3 +79,31 @@ trivy_test.json
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# ==========================
+# COVERAGE & OUTILS DEV
+# ==========================
+
+.coverage
+coverage.xml
+htmlcov/
+
+# ==========================
+# FICHIERS BACKUP / TEMP
+# ==========================
+
+*_backup.py
+*.bak
+
+# ==========================
+# FICHIERS JSON DE TEST
+# ==========================
+
+backend/analysis_*.json
+analysis_*.json
+
+# ==========================
+# SCRIPTS RACINE ORPHELINS
+# ==========================
+
+frontend_files.py

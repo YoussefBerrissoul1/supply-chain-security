@@ -1,16 +1,21 @@
 """
 Routes FastAPI pour l'analyse de securite.
-Definit les 5 endpoints obligatoires de l'API.
 
-Etape 16 : POST /analyze lance maintenant l'analyse COMPLETE en arriere-plan
-via FastAPI BackgroundTasks. Le client recoit une reponse immediate avec
-status=PENDING, puis l'analyse tourne en background et met a jour le statut
-en base (RUNNING -> DONE ou FAILED).
+Endpoints disponibles :
+  POST /analyze              → GitHub ou Docker (auto-routing sur target_type)
+  GET  /analyses             → Historique des analyses
+  GET  /analyses/{id}        → Detail complet
+  GET  /analyses/{id}/progress → Progression temps reel
+  GET  /analyses/{id}/report  → Télécharger le PDF
+  POST /analyses/{id}/cancel  → Annuler une analyse
+  POST /analyses/{id}/force-fail → Débloquer une analyse bloquée
+  GET  /health               → Health check
 """
 
 import logging
 import traceback
 from pathlib import Path
+from pydantic import BaseModel as PydanticBaseModel
 
 # pyrefly: ignore [missing-import]
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Response
@@ -967,70 +972,3 @@ def health_check(
         "database": db_status,
     }
 
-
-# ============================================================
-# POST /analyze/docker — Scanner une image Docker Hub
-# ============================================================
-
-from pydantic import BaseModel as PydanticBaseModel
-
-class ImageScanRequest(PydanticBaseModel):
-    image_name: str
-    scan_type: str = "standard"
-
-@router.post(
-    "/analyze/docker",
-    response_model=AnalysisListResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Scanner une image Docker Hub",
-)
-def create_docker_analysis(
-    request: ImageScanRequest,
-    background_tasks: BackgroundTasks,
-    response: Response,
-    db: Session = Depends(get_db),
-) -> Analysis:
-    image_name = request.image_name.strip()
-
-    if not image_name:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Le nom de l'image est requis.",
-        )
-
-    # --- Protection double scan Docker ---
-    # Si la même image est déjà en cours de scan (PENDING ou RUNNING),
-    # on retourne l'analyse existante plutôt qu'en créer une nouvelle.
-    existing = db.query(Analysis).filter(
-        Analysis.repo_url == image_name,
-        Analysis.target_type == "docker",
-        Analysis.status.in_([AnalysisStatus.PENDING, AnalysisStatus.RUNNING]),
-    ).first()
-    if existing:
-        logger.info(
-            "Image Docker '%s' déjà en cours de scan (#%d, %s) — retour de l'existante",
-            image_name, existing.id, existing.status.value,
-        )
-        response.status_code = status.HTTP_200_OK
-        return existing
-
-    logger.info("Nouvelle analyse Docker demandee : %s", image_name)
-
-    # Valider le scan_type reçu du frontend ("standard" ou "deep")
-    scan_type = request.scan_type if request.scan_type in ("standard", "deep") else "standard"
-
-    analysis = Analysis(
-        repo_url=image_name,
-        repo_name=image_name,
-        target_type="docker",
-        status=AnalysisStatus.PENDING,
-        scan_type=scan_type,
-    )
-    db.add(analysis)
-    db.commit()
-    db.refresh(analysis)
-
-    background_tasks.add_task(run_docker_analysis, analysis.id, image_name)
-    logger.info("Analyse Docker #%d creee (scan_type=%s)", analysis.id, scan_type)
-
-    return analysis

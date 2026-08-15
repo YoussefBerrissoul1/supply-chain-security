@@ -1,10 +1,14 @@
 """
 Point d'entrée de l'application FastAPI.
 Assemble les routes, configure CORS et le logging.
+
+Utilise l'API lifespan (FastAPI ≥ 0.93) à la place du déprécié on_event("startup").
 """
 
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 import logging
+import shutil
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,113 +26,89 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# --- Création de l'application FastAPI ---
-app = FastAPI(
-    title=settings.APP_NAME,
-    version=settings.APP_VERSION,
-    description="API d'audit de la chaîne d'approvisionnement logicielle. "
-                "Analyse les dépôts GitHub pour détecter les vulnérabilités de sécurité.",
-    docs_url="/docs",           # Swagger UI accessible à /docs
-    redoc_url="/redoc",         # ReDoc accessible à /redoc
-)
+# ─────────────────────────────────────────────────────────────────────────────
+# Lifespan : remplace @app.on_event("startup") / "shutdown" (déprécié ≥ 0.93)
+# ─────────────────────────────────────────────────────────────────────────────
 
-
-# --- Middleware CORS (autorise le frontend React à communiquer) ---
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],  # Ports Vite / React
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
-# --- Enregistrement des routes avec le préfixe /api/v1 ---
-app.include_router(
-    analysis_router,
-    prefix=settings.API_V1_PREFIX,
-    tags=["Analyses"],
-)
-
-
-# --- Événement au démarrage ---
-@app.on_event("startup")
-def startup_event() -> None:
-    """Log au démarrage de l'application et vérifie les clés API."""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Gestionnaire de cycle de vie de l'application.
+    Code avant yield → démarrage. Code après yield → arrêt.
+    """
     logger.info("=== %s v%s démarré ===", settings.APP_NAME, settings.APP_VERSION)
     logger.info("Mode debug : %s", settings.DEBUG)
-    logger.info("Documentation Swagger : http://%s:%s/docs", "localhost", 8000)
+    logger.info("Documentation Swagger : http://localhost:8000/docs")
 
-    # Vérification des clés API IA au démarrage
+    # ── Vérification des clés API IA ─────────────────────────────────────────
     if settings.GEMINI_API_KEY:
-        logger.info("✅ GEMINI_API_KEY configurée — Gemini sera utilisé pour les recommandations")
+        logger.info("✅ GEMINI_API_KEY configurée — Gemini actif (provider principal)")
     else:
-        logger.warning("⚠️ GEMINI_API_KEY manquante — mode fallback statique activé pour les recommandations")
+        logger.warning("⚠️  GEMINI_API_KEY manquante — fallback automatique activé")
+
+    if settings.NVIDIA_API_KEY:
+        logger.info("✅ NVIDIA_API_KEY configurée — NVIDIA NIM (moonshotai/kimi-k2.6) disponible")
+    else:
+        logger.info("ℹ️  NVIDIA_API_KEY non configurée — NVIDIA NIM désactivé")
 
     if settings.OPENROUTER_API_KEY:
-        logger.info("✅ OPENROUTER_API_KEY configurée — disponible en fallback si Gemini échoue")
+        logger.info("✅ OPENROUTER_API_KEY configurée — OpenRouter disponible en dernier fallback")
     else:
-        logger.info("ℹ️ OPENROUTER_API_KEY non configurée — pas de fallback OpenRouter")
+        logger.info("ℹ️  OPENROUTER_API_KEY non configurée — pas de fallback OpenRouter")
 
     # ── F2 : Nettoyage des analyses bloquées au redémarrage ──────────────────
-    # Si Uvicorn redémarre pendant un scan (reload, crash), les analyses restent
-    # en RUNNING indéfiniment. On les marque toutes FAILED au démarrage.
+    # Si Uvicorn redémarre pendant un scan (reload, crash), les analyses
+    # restent en RUNNING indéfiniment. On les marque FAILED au démarrage.
     db = SessionLocal()
     try:
-        # 1) Toutes les analyses RUNNING → FAILED (interrompues par le redémarrage)
+        # 1) RUNNING → FAILED (interrompues par le redémarrage)
         interrupted = db.query(Analysis).filter(
             Analysis.status == AnalysisStatus.RUNNING
         ).all()
-
         if interrupted:
             logger.warning(
-                "[Startup] %d analyse(s) interrompue(s) par redémarrage → marquées FAILED",
-                len(interrupted)
+                "[Startup] %d analyse(s) interrompue(s) → marquées FAILED",
+                len(interrupted),
             )
             for analysis in interrupted:
                 analysis.status = AnalysisStatus.FAILED
                 logger.warning(
-                    "[Startup] Analyse #%d (%s) → FAILED (interrompue)",
-                    analysis.id, analysis.repo_name or "?"
+                    "[Startup] Analyse #%d (%s) → FAILED",
+                    analysis.id, analysis.repo_name or "?",
                 )
             db.commit()
 
-        # 2) Analyses PENDING depuis trop longtemps (> 30 min) → FAILED
-        threshold_pending = datetime.now(timezone.utc) - timedelta(minutes=30)
-        stale_pending = db.query(Analysis).filter(
+        # 2) PENDING depuis > 30 min → FAILED (bloquées sans worker)
+        threshold = datetime.now(timezone.utc) - timedelta(minutes=30)
+        stale = db.query(Analysis).filter(
             Analysis.status == AnalysisStatus.PENDING,
-            Analysis.created_at < threshold_pending
+            Analysis.created_at < threshold,
         ).all()
-
-        if stale_pending:
+        if stale:
             logger.warning(
                 "[Startup] %d analyse(s) PENDING > 30min → marquées FAILED",
-                len(stale_pending)
+                len(stale),
             )
-            for analysis in stale_pending:
+            for analysis in stale:
                 analysis.status = AnalysisStatus.FAILED
             db.commit()
 
     except Exception as e:
-        logger.error("[Startup] Erreur lors du nettoyage des analyses bloquées : %s", e)
+        logger.error("[Startup] Erreur nettoyage analyses bloquées : %s", e)
     finally:
         db.close()
 
-    # ── F1 : Nettoyage des dossiers temporaires orphelins ────────────────────
-    # Si le bloc finally de cleanup_repository a échoué, des dossiers restent.
-    # On nettoie les dossiers de plus de 2h au démarrage.
-    import shutil
-    from pathlib import Path
-
+    # ── F1 : Nettoyage des dossiers temporaires orphelins (> 2h) ─────────────
     try:
+        from pathlib import Path
         clone_dir = Path(settings.CLONE_DIRECTORY)
         if clone_dir.exists():
             now_ts = datetime.now(timezone.utc).timestamp()
             orphan_count = 0
             for repo_dir in clone_dir.iterdir():
                 if repo_dir.is_dir():
-                    age_seconds = now_ts - repo_dir.stat().st_mtime
-                    if age_seconds > 7200:  # > 2 heures
+                    age_s = now_ts - repo_dir.stat().st_mtime
+                    if age_s > 7200:  # > 2 heures
                         try:
                             shutil.rmtree(repo_dir, ignore_errors=True)
                             orphan_count += 1
@@ -136,12 +116,71 @@ def startup_event() -> None:
                         except Exception:
                             pass
             if orphan_count:
-                logger.info("[Startup] %d dossier(s) temporaire(s) orphelin(s) nettoyé(s)", orphan_count)
+                logger.info("[Startup] %d dossier(s) temporaire(s) nettoyé(s)", orphan_count)
     except Exception as e:
-        logger.warning("[Startup] Nettoyage temp_repositories non critique : %s", e)
+        logger.warning("[Startup] Nettoyage temp_repositories (non critique) : %s", e)
+
+    yield  # ← L'application tourne ici
+
+    # Code d'arrêt (shutdown) — rien de spécifique pour l'instant
+    logger.info("=== %s arrêté ===", settings.APP_NAME)
 
 
-# --- Point d'entrée pour exécution directe ---
+# ─────────────────────────────────────────────────────────────────────────────
+# Création de l'application FastAPI
+# ─────────────────────────────────────────────────────────────────────────────
+
+app = FastAPI(
+    title=settings.APP_NAME,
+    version=settings.APP_VERSION,
+    description=(
+        "API d'audit de la chaîne d'approvisionnement logicielle. "
+        "Analyse les dépôts GitHub et les images Docker pour détecter "
+        "les vulnérabilités (CVE) via OSV, GHSA, NVD et Trivy."
+    ),
+    docs_url="/docs",
+    redoc_url="/redoc",
+    lifespan=lifespan,
+)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Middleware CORS
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Origines autorisées : ports Vite (5173) et React (3000) en développement.
+# En production, définir CORS_ORIGINS dans .env sous forme de liste JSON.
+_CORS_ORIGINS = [
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Enregistrement des routes
+# ─────────────────────────────────────────────────────────────────────────────
+
+app.include_router(
+    analysis_router,
+    prefix=settings.API_V1_PREFIX,
+    tags=["Analyses"],
+)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Point d'entrée pour exécution directe (python -m app.main)
+# ─────────────────────────────────────────────────────────────────────────────
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
