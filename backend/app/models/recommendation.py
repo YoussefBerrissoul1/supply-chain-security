@@ -27,7 +27,7 @@ class Recommendation(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     analysis_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("analyses.id", ondelete="CASCADE"), nullable=False
+        Integer, ForeignKey("analyses.id", ondelete="CASCADE"), nullable=False, index=True
     )
     target_type: Mapped[TargetType] = mapped_column(
         Enum(TargetType), nullable=False

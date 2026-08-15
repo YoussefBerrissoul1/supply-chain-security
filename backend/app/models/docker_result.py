@@ -18,7 +18,7 @@ class DockerResult(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     analysis_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("analyses.id", ondelete="CASCADE"), nullable=False, unique=True
+        Integer, ForeignKey("analyses.id", ondelete="CASCADE"), nullable=False, unique=True, index=True
     )
     base_image: Mapped[str] = mapped_column(String(255), nullable=False)
     vulnerabilities_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

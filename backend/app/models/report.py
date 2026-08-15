@@ -26,7 +26,7 @@ class Report(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     analysis_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("analyses.id", ondelete="CASCADE"), nullable=False
+        Integer, ForeignKey("analyses.id", ondelete="CASCADE"), nullable=False, index=True
     )
     format: Mapped[ReportFormat] = mapped_column(
         Enum(ReportFormat), nullable=False

@@ -18,7 +18,7 @@ class Dependency(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     analysis_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("analyses.id", ondelete="CASCADE"), nullable=False
+        Integer, ForeignKey("analyses.id", ondelete="CASCADE"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     version: Mapped[str] = mapped_column(String(100), nullable=False)
