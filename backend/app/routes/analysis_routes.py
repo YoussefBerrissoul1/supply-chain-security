@@ -14,8 +14,6 @@ Endpoints disponibles :
 
 import logging
 import traceback
-from pathlib import Path
-from pydantic import BaseModel as PydanticBaseModel
 
 # pyrefly: ignore [missing-import]
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Response

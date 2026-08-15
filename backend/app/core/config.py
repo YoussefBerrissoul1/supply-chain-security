@@ -3,7 +3,6 @@ Configuration centralisée de l'application.
 Lit les variables depuis le fichier .env via Pydantic BaseSettings.
 """
 import os
-import requests
 
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
