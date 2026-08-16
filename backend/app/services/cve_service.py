@@ -22,6 +22,7 @@ from app.services.cve_providers.models import VulnerabilityResult, Severity, cvs
 from app.services.cve_providers.osv_provider import OSVProvider
 from app.services.cve_providers.nvd_provider import NVDProvider
 from app.services.cve_providers.ghsa_provider import GHSAProvider
+from app.services.cve_providers.ghsa_rest_provider import fetch_ghsa_advisory_by_cve
 from app.services.cve_providers.correlation_engine import correlate_vulnerabilities
 from app.services.cve_providers.utils import fetch_epss_scores
 
@@ -333,6 +334,88 @@ def scan_all_vulnerabilities(
     else:
         if scan_type != "deep":
             logger.debug("[CVE] EPSS ignoré (mode standard) — activer mode deep pour l'enrichissement EPSS")
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # ÉTAPE 4b : GHSA REST enrichissement — MODE DEEP UNIQUEMENT (sans token)
+    # Source : https://api.github.com/advisories (API publique, 60 req/h sans token)
+    # Appelé en mode deep pour enrichir les CVE qui manquent encore de :
+    #   - fixed_version (pas trouvé via OSV/NVD)
+    #   - epss_score (non fourni par NVD pour cette CVE)
+    # → Différence concrète et observable entre standard et deep
+    # ═══════════════════════════════════════════════════════════════════════════
+    if scan_type == "deep" and time.monotonic() < scan_deadline:
+        # Cibler les CVE incomplètes (pas de fixed_version OU pas d'epss_score)
+        cves_to_enrich_ghsa: list[tuple[str, object, str]] = []  # (cve_id, vuln_obj, dep_key)
+        seen_ghsa: set[str] = set()
+
+        for dep_key, vulns in results.items():
+            for vuln in vulns:
+                if (
+                    vuln.cve_id.startswith("CVE-")
+                    and vuln.cve_id not in seen_ghsa
+                    and (vuln.fixed_version is None or vuln.epss_score is None)
+                ):
+                    seen_ghsa.add(vuln.cve_id)
+                    cves_to_enrich_ghsa.append((vuln.cve_id, vuln, dep_key))
+
+        if cves_to_enrich_ghsa:
+            logger.info(
+                "[CVE] Étape 4b — GHSA REST enrichissement (mode DEEP) : "
+                "%d CVE sans fixed_version ou epss_score",
+                len(cves_to_enrich_ghsa)
+            )
+            t0 = time.monotonic()
+            ghsa_rest_hits = 0
+
+            def _ghsa_rest_one(
+                item: tuple[str, object, str]
+            ) -> tuple[str, object]:
+                cve_id, vuln, dep_key = item
+                adv = fetch_ghsa_advisory_by_cve(cve_id, timeout=8.0)
+                return cve_id, adv
+
+            with ThreadPoolExecutor(max_workers=3) as executor:  # Limité pour rate-limit 60 req/h
+                futures_ghsa = {
+                    executor.submit(_ghsa_rest_one, item): item
+                    for item in cves_to_enrich_ghsa
+                }
+                for future in as_completed(futures_ghsa):
+                    if time.monotonic() > scan_deadline:
+                        break
+                    try:
+                        cve_id, adv = future.result()
+                        if adv is None:
+                            continue
+                        # Appliquer les enrichissements manquants sur toutes les occurrences
+                        for dep_key2, vulns2 in results.items():
+                            for v in vulns2:
+                                if v.cve_id != cve_id:
+                                    continue
+                                changed = False
+                                if v.fixed_version is None and adv.fixed_version:
+                                    v.fixed_version = adv.fixed_version
+                                    changed = True
+                                if v.epss_score is None and adv.epss_score is not None:
+                                    v.epss_score = adv.epss_score
+                                    changed = True
+                                if changed:
+                                    ghsa_rest_hits += 1
+                                    if "GHSA-REST" not in v.source:
+                                        v.source = v.source + "+GHSA-REST"
+                    except Exception:
+                        pass
+
+            logger.info(
+                "[CVE] GHSA REST terminé en %.2fs — %d CVE enrichies (%d tentées)",
+                time.monotonic() - t0, ghsa_rest_hits, len(cves_to_enrich_ghsa)
+            )
+        else:
+            logger.info("[CVE] Étape 4b — GHSA REST ignoré (toutes les CVE déjà complètes)")
+    else:
+        if scan_type != "deep":
+            logger.debug(
+                "[CVE] GHSA REST ignoré (mode standard) — activer mode deep pour cet enrichissement"
+            )
 
     # ═══════════════════════════════════════════════════════════════════════════
     # BILAN FINAL
