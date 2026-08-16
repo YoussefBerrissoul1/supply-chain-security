@@ -140,3 +140,115 @@ class TestComputeSecurityScore:
         result = compute_security_score(cve_results={}, docker_result=docker)
         assert result.final_score < 100.0
         assert result.has_docker is True
+
+
+class TestLowFloorPenalty:
+    """Tests pour la pénalité plancher proportionnelle des CVE LOW/NONE."""
+
+    def _make_low_vulns(self, n: int) -> dict:
+        """Crée n CVE LOW avec des IDs uniques."""
+        from app.services.cve_providers.models import Severity
+        return {
+            f"pkg{i}@1.0": [_make_vuln(f"CVE-2024-{i:04d}", 2.0, Severity.LOW)]
+            for i in range(n)
+        }
+
+    def test_zero_vulns_score_100(self):
+        """Sans CVE, score = 100 (inchangé)."""
+        result = compute_security_score(cve_results={})
+        assert result.final_score == 100.0
+
+    def test_low_cvss_gets_floor_penalty(self):
+        """Des CVE LOW doivent réduire le score (plus de score=100 avec N CVE LOW)."""
+        from app.services.cve_providers.models import Severity
+        vulns = self._make_low_vulns(5)
+        result = compute_security_score(cve_results=vulns)
+        # 5 × 0.4 = 2.0 pts → score 98.0 (pas 100)
+        assert result.final_score < 100.0
+        assert result.final_score == pytest.approx(98.0, abs=0.1)
+
+    def test_23_low_vulns_proportional_score(self):
+        """23 CVE LOW → pénalité proportionnelle (~9.2 pts)."""
+        vulns = self._make_low_vulns(23)
+        result = compute_security_score(cve_results=vulns)
+        # 23 × 0.4 = 9.2 pts → score 90.8 (pas 100!)
+        assert result.final_score < 100.0
+        assert result.final_score == pytest.approx(90.8, abs=0.1)
+
+    def test_many_low_vulns_capped(self):
+        """50+ CVE LOW → plafond à -10 pts (score 90.0 minimum)."""
+        vulns = self._make_low_vulns(50)
+        result = compute_security_score(cve_results=vulns)
+        # 50 × 0.4 = 20 > CAP_LOW_FLOOR(10) → score 90.0
+        assert result.final_score == pytest.approx(90.0, abs=0.1)
+
+        # Même chose avec 100 CVE LOW
+        vulns_100 = self._make_low_vulns(100)
+        result_100 = compute_security_score(cve_results=vulns_100)
+        assert result_100.final_score == pytest.approx(90.0, abs=0.1)  # Même plafond
+
+    def test_low_penalty_proportional_not_fixed(self):
+        """Vérifie que 10 CVE LOW donne 2× plus de pénalité que 5 CVE LOW."""
+        r5  = compute_security_score(cve_results=self._make_low_vulns(5))
+        r10 = compute_security_score(cve_results=self._make_low_vulns(10))
+        # 5 × 0.4 = 2.0 ; 10 × 0.4 = 4.0 → ratio 2:1
+        assert r10.total_penalties == pytest.approx(r5.total_penalties * 2, abs=0.1)
+
+
+class TestSeverityHardCaps:
+    """Tests pour les hard caps de score par sévérité."""
+
+    def test_critical_caps_score_at_59(self):
+        """≥ 1 CVE CRITICAL → score final ≤ 59 (jamais BON ni EXCELLENT)."""
+        from app.services.cve_providers.models import Severity
+        vulns = {"flask@1.0": [_make_vuln("CVE-2024-0001", 9.8, Severity.CRITICAL)]}
+        result = compute_security_score(cve_results=vulns)
+        assert result.final_score <= 59.0, (
+            f"CRITICAL cap échoué : score={result.final_score} > 59"
+        )
+        assert result.risk_level in (RiskLevel.CRITIQUE, RiskLevel.MAUVAIS, RiskLevel.MOYEN)
+
+    def test_high_caps_score_at_79(self):
+        """≥ 1 CVE HIGH → score final ≤ 79 (jamais EXCELLENT)."""
+        from app.services.cve_providers.models import Severity
+        vulns = {"pkg@1.0": [_make_vuln("CVE-2024-0002", 7.5, Severity.HIGH)]}
+        result = compute_security_score(cve_results=vulns)
+        assert result.final_score <= 79.0, (
+            f"HIGH cap échoué : score={result.final_score} > 79"
+        )
+
+    def test_medium_caps_score_at_89(self):
+        """≥ 1 CVE MEDIUM → score final ≤ 89 (jamais EXCELLENT)."""
+        from app.services.cve_providers.models import Severity
+        vulns = {"pkg@1.0": [_make_vuln("CVE-2024-0003", 5.0, Severity.MEDIUM)]}
+        result = compute_security_score(cve_results=vulns)
+        assert result.final_score <= 89.0, (
+            f"MEDIUM cap échoué : score={result.final_score} > 89"
+        )
+
+    def test_critical_takes_priority_over_high_cap(self):
+        """Avec CRITICAL + HIGH, c'est le cap CRITICAL (59) qui s'applique."""
+        from app.services.cve_providers.models import Severity
+        vulns = {
+            "pkg@1.0": [
+                _make_vuln("CVE-C", 9.8, Severity.CRITICAL),
+                _make_vuln("CVE-H", 7.5, Severity.HIGH),
+            ]
+        }
+        result = compute_security_score(cve_results=vulns)
+        assert result.final_score <= 59.0
+
+    def test_no_vuln_no_cap(self):
+        """Sans CVE, aucun cap ne s'applique — score peut être 100."""
+        result = compute_security_score(cve_results={})
+        assert result.final_score == 100.0
+
+    def test_only_low_vulns_no_severity_cap(self):
+        """Avec uniquement des CVE LOW, aucun hard cap CRITICAL/HIGH/MEDIUM."""
+        from app.services.cve_providers.models import Severity
+        vulns = {"pkg@1.0": [_make_vuln("CVE-L", 2.0, Severity.LOW)]}
+        result = compute_security_score(cve_results=vulns)
+        # Pas de hard cap → score réduit uniquement par plancher LOW
+        assert result.final_score > 89.0  # Pas de cap HIGH/MEDIUM/CRITICAL
+        assert result.final_score < 100.0  # Mais pas 100 non plus (plancher LOW)
+

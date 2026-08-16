@@ -14,17 +14,27 @@ Ce service reçoit :
 Ce service retourne :
     - ScoreResult : score global, détail des pénalités, interprétation
 
-ALGORITHME (défini dans CLAUDE.md) :
-    Score = 100 − Σ pénalités   (minimum 0)
+ALGORITHME :
+    Score = min(plafond_sévérité, 100 − Σ pénalités)  (minimum 0)
 
-    | Facteur                       | Pénalité | Plafond |
-    |-------------------------------|----------|---------|
-    | CVE CRITICAL (CVSS ≥ 9.0)    | −15 pts  | max −45 |
-    | CVE HIGH     (CVSS 7.0–8.9)  | −8 pts   | max −24 |
-    | CVE MEDIUM   (CVSS 4.0–6.9)  | −3 pts   | max −15 |
-    | Package abandonné (> 2 ans)   | −5 pts   | max −20 |
-    | Image Docker vulnérable       | −10 pts  | max −20 |
-    | Mauvaise pratique Docker      | −5 pts   | max −10 |
+    Pénalités CVE (matrice 3D : Sévérité × Exploitabilité × Impact) :
+    | Facteur                        | Pénalité unitaire | Plafond |
+    |--------------------------------|-------------------|---------|
+    | CVE CRITICAL (CVSS ≥ 9.0)     | −15 pts × mults   | −       |
+    | CVE HIGH     (CVSS 7.0–8.9)   | −8 pts  × mults   | −       |
+    | CVE MEDIUM   (CVSS 4.0–6.9)   | −3 pts  × mults   | −       |
+    | CVE LOW/NONE (plancher)        | −0.4 pt/CVE       | max −10 |
+    | CVE sans correctif (CRITICAL)  | −3 pts/CVE        | max −15 |
+    | CVE sans correctif (HIGH)      | −1.5 pt/CVE       | max −9  |
+    | Image Docker vulnérable        | −10 à −20 pts     | max −20 |
+    | Mauvaise pratique Docker       | −5 pts/problème   | max −10 |
+
+    Plafonds par sévérité (hard caps sur le score final) :
+    | Sévérité max détectée | Score max autorisé |
+    |-----------------------|--------------------|
+    | ≥ 1 CVE CRITICAL      | 59  (jamais BON+)  |
+    | ≥ 1 CVE HIGH         | 79  (jamais EXCELL.)|
+    | ≥ 1 CVE MEDIUM        | 89  (jamais EXCELL.)|
 
 INTERPRÉTATION DU SCORE :
      0 – 29  → CRITIQUE  🔴
@@ -52,16 +62,23 @@ logger = logging.getLogger(__name__)
 # (Valeurs définies dans CLAUDE.md — ne pas modifier sans validation)
 # ==============================================================
 
-# Pénalités par vulnérabilité (en points)
+# Pénalités par vulnérabilité (en points) — matrice 3D Sévérité × Exploit × Impact
 PENALTY_CRITICAL: float = 15.0   # CVE CVSS >= 9.0
 PENALTY_HIGH: float = 8.0        # CVE CVSS 7.0-8.9
 PENALTY_MEDIUM: float = 3.0      # CVE CVSS 4.0-6.9
-PENALTY_LOW: float = 0.0         # CVE CVSS < 4.0 -- pas de penalite directe
+PENALTY_LOW: float = 0.0         # CVE CVSS < 4.0 — géré par plancher LOW séparé
 
-# Plafonds par catégorie (limite max de déduction)
-CAP_CRITICAL: float = 45.0
-CAP_HIGH: float = 24.0
-CAP_MEDIUM: float = 15.0
+# Plancher LOW/NONE : pénalité proportionnelle pour les CVE de faible sévérité
+# Rationale : N CVE LOW ≠ sécurité parfaite. Formule : min(CAP_LOW_FLOOR, N × PENALTY_LOW_FLOOR)
+# Exemples :  5 CVE LOW →  -2.0 pts |  23 CVE LOW →  -9.2 pts | 50+ CVE LOW → -10 pts (plafond)
+PENALTY_LOW_FLOOR: float = 0.4   # pts par CVE LOW ou NONE
+CAP_LOW_FLOOR: float = 10.0      # plafond total pour la pénalité plancher LOW
+
+# Plafonds de score par sévérité (hard caps — indépendants des pénalités calculées)
+# Garantissent qu'un projet avec des CVE HIGH/CRITICAL ne peut pas scorer EXCELLENT/BON
+MAX_SCORE_WITH_CRITICAL: float = 59.0  # ≥ 1 CRITICAL → jamais BON ni EXCELLENT
+MAX_SCORE_WITH_HIGH:     float = 79.0  # ≥ 1 HIGH     → jamais EXCELLENT
+MAX_SCORE_WITH_MEDIUM:   float = 89.0  # ≥ 1 MEDIUM   → jamais EXCELLENT
 
 # Pénalités Docker
 PENALTY_DOCKER_VULN: float = 10.0   # Par tranche de vulnérabilités Docker significatives
@@ -246,6 +263,8 @@ def _compute_cve_penalties(
     penalties: list[PenaltyLine] = []
     total_cve = len(unique_cves)
 
+    low_none_count = 0  # Compteur pour la pénalité plancher LOW
+
     for cve_id, (vuln, dep_key) in unique_cves.items():
         counts[vuln.severity.value] = counts.get(vuln.severity.value, 0) + 1
 
@@ -257,7 +276,10 @@ def _compute_cve_penalties(
         elif vuln.severity == Severity.MEDIUM:
             base_penalty = PENALTY_MEDIUM
         else:
-            continue  # LOW / NONE -> pas de pénalité directe
+            # LOW / NONE : pas de pénalité individuelle ici —
+            # comptées pour la pénalité plancher calculée après la boucle.
+            low_none_count += 1
+            continue
 
         # Trouver si la dépendance est dev
         is_dev_dep = False
@@ -335,6 +357,27 @@ def _compute_cve_penalties(
             "Pénalité Matrix 3D pour %s : Base=%.1f × Exploit=%.2f × Impact=%.2f → -%.2f pts%s",
             cve_id, base_penalty, exploit_mult, impact_mult, final_penalty,
             f" [EPSS={epss:.2f}]" if epss is not None else ""
+        )
+
+    # ── Pénalité plancher pour CVE LOW/NONE ──────────────────────────────────
+    # Formule proportionnelle : min(CAP_LOW_FLOOR, low_none_count × PENALTY_LOW_FLOOR)
+    # Garantit qu'un projet avec de nombreuses CVE LOW ne peut pas scorer 100.
+    # Exemples :  5 LOW →  -2.0 pts |  23 LOW →  -9.2 pts | 25+ LOW → -10 pts
+    if low_none_count > 0:
+        raw_low = low_none_count * PENALTY_LOW_FLOOR
+        applied_low = min(raw_low, CAP_LOW_FLOOR)
+        applied_low = round(applied_low, 2)
+        penalties.append(PenaltyLine(
+            category=f"{low_none_count} CVE LOW/NONE (pénalité plancher proportionnelle)",
+            count=low_none_count,
+            unit_penalty=PENALTY_LOW_FLOOR,
+            raw_penalty=round(raw_low, 2),
+            applied=applied_low,
+            cap=CAP_LOW_FLOOR,
+        ))
+        logger.info(
+            "Pénalité plancher LOW : %d CVE × %.1f = %.2f pts (plafond %.0f) → -%.2f pts",
+            low_none_count, PENALTY_LOW_FLOOR, raw_low, CAP_LOW_FLOOR, applied_low
         )
 
     return penalties, counts, total_cve
@@ -541,6 +584,32 @@ def compute_security_score(
     total_deduction = sum(p.applied for p in all_penalties)
     raw_score = 100.0 - total_deduction
     final_score = round(max(0.0, raw_score), 1)
+
+    # ── Hard caps par sévérité (indépendants des pénalités calculées) ─────────
+    # Garantissent qu'un projet avec des CVE CRITICAL/HIGH/MEDIUM ne peut pas
+    # atteindre les niveaux EXCELLENT ou BON malgré peu de pénalités absolues.
+    # Exemple : 1 CRITICAL peu pénalisée par la matrice → cap à 59 quand même.
+    if cve_counts.get("CRITICAL", 0) > 0:
+        if final_score > MAX_SCORE_WITH_CRITICAL:
+            logger.info(
+                "[Score] Hard cap CRITICAL appliqué : %.1f → %.1f (≥1 CVE CRITICAL)",
+                final_score, MAX_SCORE_WITH_CRITICAL
+            )
+            final_score = MAX_SCORE_WITH_CRITICAL
+    elif cve_counts.get("HIGH", 0) > 0:
+        if final_score > MAX_SCORE_WITH_HIGH:
+            logger.info(
+                "[Score] Hard cap HIGH appliqué : %.1f → %.1f (≥1 CVE HIGH)",
+                final_score, MAX_SCORE_WITH_HIGH
+            )
+            final_score = MAX_SCORE_WITH_HIGH
+    elif cve_counts.get("MEDIUM", 0) > 0:
+        if final_score > MAX_SCORE_WITH_MEDIUM:
+            logger.info(
+                "[Score] Hard cap MEDIUM appliqué : %.1f → %.1f (≥1 CVE MEDIUM)",
+                final_score, MAX_SCORE_WITH_MEDIUM
+            )
+            final_score = MAX_SCORE_WITH_MEDIUM
 
     risk_level = score_to_risk_level(final_score)
 

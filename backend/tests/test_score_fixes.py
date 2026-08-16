@@ -56,17 +56,23 @@ class TestFIX3EPSSMultiplier:
     """FIX3 : EPSS élevé doit augmenter la pénalité."""
 
     def test_high_epss_increases_penalty(self):
-        """EPSS >= 0.7 → pénalité plus élevée (score plus bas)."""
+        """EPSS >= 0.7 → pénalité plus élevée (total_penalties plus grand).
+        Note : on compare les pénalités brutes (pas le score final)
+        car le hard cap sevérité peut aplatir les scores finaux."""
         vuln_high_epss = _vuln("CVE-2024-0001", Severity.HIGH, 7.5, epss_score=0.85)
         vuln_low_epss  = _vuln("CVE-2024-0002", Severity.HIGH, 7.5, epss_score=0.05)
 
-        score_high = compute_security_score({"pkg@1": [vuln_high_epss]}).final_score
-        score_low  = compute_security_score({"pkg@1": [vuln_low_epss]}).final_score
+        res_high = compute_security_score({"pkg@1": [vuln_high_epss]})
+        res_low  = compute_security_score({"pkg@1": [vuln_low_epss]})
 
-        assert score_high < score_low, (
-            f"FIX3 : EPSS élevé ({0.85}) devrait donner un score plus bas "
-            f"({score_high}) que EPSS faible ({score_low})"
+        # EPSS élevé → pénalité totale plus grande
+        assert res_high.total_penalties > res_low.total_penalties, (
+            f"FIX3 : EPSS élevé ({0.85}) devrait donner plus de pénalités "
+            f"({res_high.total_penalties}) que EPSS faible ({res_low.total_penalties})"
         )
+        # Et dans tous les cas, HIGH cap à 79 max
+        assert res_high.final_score <= 79.0
+        assert res_low.final_score  <= 79.0
 
     def test_no_epss_behaves_like_epss_zero(self):
         """Sans EPSS (None), pas de majoration → comportement identique à epss=0."""
@@ -80,14 +86,15 @@ class TestFIX3EPSSMultiplier:
         assert abs(score_none - score_zero) <= 0.1
 
     def test_medium_epss_moderate_increase(self):
-        """EPSS entre 0.4 et 0.7 → majoration modérée (x1.1 vs x1.0)."""
+        """EPSS entre 0.4 et 0.7 → majoration modérée (x1.1 vs x1.0).
+        On compare les pénalités totales pour ne pas être affecté par le hard cap."""
         vuln_med  = _vuln("CVE-M", Severity.HIGH, 7.5, epss_score=0.5)
         vuln_none = _vuln("CVE-N", Severity.HIGH, 7.5, epss_score=None)
 
-        score_med  = compute_security_score({"p@1": [vuln_med]}).final_score
-        score_none = compute_security_score({"p@1": [vuln_none]}).final_score
+        res_med  = compute_security_score({"p@1": [vuln_med]})
+        res_none = compute_security_score({"p@1": [vuln_none]})
 
-        assert score_med <= score_none  # EPSS moyen ≤ sans EPSS
+        assert res_med.total_penalties >= res_none.total_penalties  # EPSS moyen ≥ sans EPSS
 
 
 class TestFIX4UnpatchedPenalty:
