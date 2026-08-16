@@ -86,7 +86,10 @@ class AnalysisRequest(AnalysisBase):
     Schema d'entrée pour lancer une analyse.
     Hérite de AnalysisBase avec toutes les validations SEC3.
     """
-    pass
+    force_rescan: bool = Field(
+        default=False,
+        description="Si True, ignore le cache et relance un scan complet même si une analyse récente existe.",
+    )
 
 
 # ============================================================

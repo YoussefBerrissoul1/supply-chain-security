@@ -59,6 +59,12 @@ class Settings(BaseSettings):
     NVIDIA_API_KEY: str = ""
     AI_PROVIDER: str = "gemini"     # "gemini" ou "openrouter"
 
+    # --- Cache analyses ---
+    # TTL du cache de résultats : une analyse DONE pour le même repo+scan_type
+    # est retournée directement sans relancer le scan complet.
+    # Force_rescan=true dans la requête permet de contourner le cache.
+    CACHE_TTL_HOURS: int = 24  # Défaut : 24h, configurable via .env
+
     # --- Rapports ---
     REPORT_OUTPUT_DIR: str = "./reports"
 

@@ -664,13 +664,18 @@ def force_fail_analysis(
 # POST /analyze — Lancer une analyse GitHub
 # ============================================================
 
+from datetime import datetime, timezone, timedelta
+
+
 @router.post(
     "/analyze",
     response_model=AnalysisListResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Lancer une analyse de securite (GitHub)",
     description="Soumet une URL GitHub pour analyse (scan Standard ou Deep). "
-                "Retourne immediatement avec status=PENDING. L'analyse tourne en arriere-plan.",
+                "Retourne immediatement avec status=PENDING. L'analyse tourne en arriere-plan. "
+                "Si une analyse récente (< CACHE_TTL_HOURS) existe pour ce repo+scan_type, "
+                "elle est retournée directement (HTTP 200) sauf si force_rescan=True.",
 )
 def create_analysis(
     request: AnalysisRequest,
@@ -736,7 +741,33 @@ def create_analysis(
     repo_name = validated_url.rstrip("/").split("/")[-1]
     scan_type = request.scan_type if request.scan_type in ("standard", "deep") else "standard"
 
-    # Protection anti-doublon
+    # ── Cache 24h (NOUVEAU) ────────────────────────────────────────────────────
+    # Si une analyse DONE existe pour le même repo_url + scan_type depuis moins
+    # de CACHE_TTL_HOURS, on la retourne directement sans relancer le scan.
+    # force_rescan=True dans la requête permet de forcer un nouveau scan.
+    if not request.force_rescan:
+        cache_cutoff = datetime.now(timezone.utc) - timedelta(hours=settings.CACHE_TTL_HOURS)
+        cached = (
+            db.query(Analysis)
+            .filter(
+                Analysis.repo_url == validated_url,
+                Analysis.target_type == "github",
+                Analysis.scan_type == scan_type,
+                Analysis.status == AnalysisStatus.DONE,
+                Analysis.created_at >= cache_cutoff,
+            )
+            .order_by(Analysis.created_at.desc())
+            .first()
+        )
+        if cached:
+            logger.info(
+                "[Cache] Analyse #%d retournée depuis le cache (%s, scan_type=%s, âge < %dh)",
+                cached.id, repo_name, scan_type, settings.CACHE_TTL_HOURS,
+            )
+            response.status_code = status.HTTP_200_OK
+            return cached
+
+    # Protection anti-doublon (analyse déjà en cours)
     existing = db.query(Analysis).filter(
         Analysis.repo_url == validated_url,
         Analysis.target_type == "github",
