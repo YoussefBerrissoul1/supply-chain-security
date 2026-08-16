@@ -112,10 +112,21 @@ def generate_recommendations(
             else:
                 target_type = TargetType.GLOBAL
 
+            rec_text = rec.get("recommendation_text", "")
+
+            # Nouveau champ "package" (v2.0 prompt orienté package) :
+            # On préfixe le texte avec le nom du package pour la traçabilité,
+            # sans migration DB (le champ package_name n'existe pas encore en base).
+            pkg_name = rec.get("package") or rec.get("package_name")
+            if pkg_name and target_type == TargetType.DEPENDENCY:
+                if not rec_text.startswith(f"[{pkg_name}]"):
+                    rec_text = f"[{pkg_name}] {rec_text}"
+                logger.debug("Recommandation pour package '%s' : %d chars", pkg_name, len(rec_text))
+
             db_rec = Recommendation(
                 analysis_id=analysis_id,
                 target_type=target_type,
-                recommendation_text=rec.get("recommendation_text", ""),
+                recommendation_text=rec_text,
                 provider=provider
             )
             db.add(db_rec)
@@ -138,82 +149,122 @@ def _build_prompt(
     total_deps: int = 0,
 ) -> str:
     """
-    Construit un prompt détaillé et structuré pour l'IA.
-    Demande des recommandations en paragraphes clairs et actionnables.
+    Construit un prompt orienté par package pour l'IA.
+
+    Structure :
+      - Contexte projet (score, écosystèmes, nb deps)
+      - Liste des packages vulnérables, chacun avec ses CVE, EPSS, fix
+      - Demande 1 recommandation par package + recommandations globales
+
+    v2.0 : orienté package (au lieu de liste de CVE en vrac).
+    Inclut EPSS pour prioriser selon la probabilité d'exploitation réelle.
     """
     eco_str = ", ".join(ecosystems) if ecosystems else "non détecté"
-    project_context = (
-        f"Nom du dépôt GitHub analysé : {repo_name}\n"
-        f"Écosystèmes détectés : {eco_str}\n"
-        f"Nombre total de dépendances : {total_deps}\n"
-    )
 
-    summary = (
-        f"Score de sécurité global : {score_result.final_score}/100\n"
-        f"Niveau de risque : {score_result.risk_level.value}\n"
-        f"Nombre total de CVE : {score_result.total_cve}\n"
-        f"Dockerfile présent : {'Oui' if score_result.has_docker else 'Non'}\n"
-    )
-
-    penalties_str = ""
-    for p in score_result.penalties[:10]:  # Limiter pour ne pas saturer le contexte
-        penalties_str += f"- {p.category} : -{p.applied:.0f} pts\n"
-
-    # Construire la liste des CVEs pour le prompt
-    cves_str = ""
-    cve_count = 0
-    critical_and_high = []
+    # ── Construire la vue par package ──────────────────────────────────────────
+    # { "flask@2.3.0": [vuln1, vuln2, ...], ... }  — seulement les packages avec CVE
+    packages_with_vulns: dict[str, list[VulnerabilityResult]] = {}
     for dep_key, vulns in cve_results.items():
-        for vuln in vulns:
-            sev_val = vuln.severity.value if hasattr(vuln.severity, 'value') else str(vuln.severity)
-            if sev_val in ["CRITICAL", "HIGH"]:
-                critical_and_high.append((dep_key, vuln, sev_val))
+        # Exclure la méta-clé interne
+        if dep_key == "__scan_meta__":
+            continue
+        real_vulns = [v for v in vulns if not v.cve_id.startswith("__")]
+        if real_vulns:
+            packages_with_vulns[dep_key] = real_vulns
 
-    # Trier par score CVSS décroissant
-    critical_and_high.sort(key=lambda x: x[1].cvss_score, reverse=True)
+    # Trier les packages par sévérité max (CRITICAL > HIGH > MEDIUM > LOW)
+    SEV_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "NONE": 4}
 
-    for dep_key, vuln, sev_val in critical_and_high[:20]:
-        cve_count += 1
-        exploit_note = " ⚠️ EXPLOIT PUBLIC CONNU" if vuln.exploit_available else ""
-        fixed_note = f" → corriger avec v{vuln.fixed_version}" if vuln.fixed_version else " (aucun patch disponible)"
-        cves_str += (
-            f"- [{sev_val} CVSS:{vuln.cvss_score}] {vuln.cve_id} sur {dep_key}{fixed_note}{exploit_note}\n"
-            f"  {vuln.description[:150]}...\n"
+    def _pkg_priority(item: tuple) -> int:
+        dep_key, vulns = item
+        max_sev = min(
+            (SEV_ORDER.get(v.severity.value if hasattr(v.severity, "value") else str(v.severity), 4)
+             for v in vulns),
+            default=4
         )
+        # Secondaire : EPSS max (probabilité d'exploitation réelle)
+        max_epss = max((v.epss_score or 0.0 for v in vulns), default=0.0)
+        return max_sev * 1000 + int((1.0 - max_epss) * 999)
 
-    prompt = f"""Tu es un expert senior en cybersécurité spécialisé dans la sécurisation de la chaîne d'approvisionnement logicielle (Software Supply Chain Security). Tu analyses des résultats de scan de sécurité et génères des recommandations professionnelles.
+    sorted_packages = sorted(packages_with_vulns.items(), key=_pkg_priority)
 
-CONTEXTE DU PROJET ANALYSÉ :
-{project_context}
+    # Limiter à 15 packages max (éviter de saturer le contexte)
+    packages_section = ""
+    packages_for_json: list[str] = []
+    for dep_key, vulns in sorted_packages[:15]:
+        packages_for_json.append(dep_key)
 
-RÉSULTATS DU SCAN DE SÉCURITÉ :
-{summary}
+        # Sévérité max du package
+        sevs = [v.severity.value if hasattr(v.severity, "value") else str(v.severity) for v in vulns]
+        max_sev = min(sevs, key=lambda s: SEV_ORDER.get(s, 4))
 
-PÉNALITÉS APPLIQUÉES (Matrice de risque : Sévérité × Exploitabilité × Impact) :
-{penalties_str if penalties_str else "Aucune pénalité."}
+        # Trouver la meilleure version corrective (non-None)
+        fixed_versions = [v.fixed_version for v in vulns if v.fixed_version]
+        best_fix = fixed_versions[0] if fixed_versions else None
 
-VULNÉRABILITÉS CRITIQUES ET HAUTES (top 20 sur {cve_count} total) :
-{cves_str if cves_str else "Aucune vulnérabilité majeure détectée."}
+        packages_section += f"\n### Package : {dep_key}  [Sévérité max : {max_sev}]\n"
+        if best_fix:
+            packages_section += f"  Mise à jour corrective disponible : v{best_fix}\n"
+        else:
+            packages_section += "  Aucun patch disponible — envisager un remplacement ou une mitigation.\n"
 
-MISSION : Génère exactement 5 recommandations de sécurité. Chaque recommandation DOIT :
-1. Être rédigée sous forme d'un paragraphe de 3-5 phrases complètes (pas de listes à puces)
-2. Citer EXPLICITEMENT les noms de paquets et versions détectés dans ce scan
-3. Donner la version corrective exacte quand disponible
-4. Expliquer POURQUOI cette vulnérabilité est dangereuse (impact concret)
-5. Donner des instructions CONCRÈTES (commandes npm update X, pip install X==Y, etc.)
-6. Indiquer si l'utilisateur PEUT ou NE PEUT PAS télécharger ce dépôt en sécurité
+        # Lister les CVE du package (max 5)
+        for vuln in sorted(vulns, key=lambda v: v.cvss_score, reverse=True)[:5]:
+            sev = vuln.severity.value if hasattr(vuln.severity, "value") else str(vuln.severity)
+            epss_str = f"EPSS={vuln.epss_score:.1%}" if vuln.epss_score is not None else "EPSS=?"
+            exploit_flag = " ⚠️ EXPLOIT PUBLIC" if vuln.exploit_available else ""
+            fix_str = f" → fix: v{vuln.fixed_version}" if vuln.fixed_version else ""
+            desc_short = (vuln.description or "")[:120].rstrip()
+            packages_section += (
+                f"  • {vuln.cve_id} [{sev} CVSS:{vuln.cvss_score:.1f} {epss_str}]{exploit_flag}{fix_str}\n"
+                f"    {desc_short}{'...' if len(vuln.description or '') > 120 else ''}\n"
+            )
 
-Pour les recommandations de type "dependency" : citer les paquets vulnérables par nom, donner la commande de mise à jour exacte.
-Pour les recommandations "docker" : donner les modifications Dockerfile exactes.
-Pour les recommandations "global" : donner les étapes DevSecOps à implémenter.
+    # ── Résumé global ──────────────────────────────────────────────────────────
+    cve_counts_str = " | ".join(
+        f"{k}: {v}" for k, v in sorted(score_result.cve_counts.items(), key=lambda x: SEV_ORDER.get(x[0], 4))
+        if v > 0
+    )
 
-Tu dois retourner UNIQUEMENT un tableau JSON valide (sans markdown, sans backticks), avec exactement 5 objets :
+    # Nombre de recommandations attendues : 1 par package (max 15) + 2 globales
+    n_dep_recs = min(len(packages_for_json), 15)
+    n_total_recs = n_dep_recs + 2  # + DevSecOps global + Docker/Architecture
+
+    # JSON template pour guider l'IA
+    json_example_deps = "\n".join([
+        f'  {{"target_type": "dependency", "package": "{pkg}", "recommendation_text": "..."}},'
+        for pkg in packages_for_json[:3]
+    ])
+
+    prompt = f"""Tu es un expert senior en cybersécurité spécialisé dans la sécurisation de la chaîne d'approvisionnement logicielle (Software Supply Chain Security).
+
+CONTEXTE DU PROJET : {repo_name}
+  Écosystèmes : {eco_str}
+  Dépendances totales : {total_deps}
+  Score de sécurité : {score_result.final_score}/100 (niveau : {score_result.risk_level.value})
+  CVE détectées : {score_result.total_cve} ({cve_counts_str if cve_counts_str else "aucune"})
+  Dockerfile présent : {"Oui" if score_result.has_docker else "Non"}
+
+PACKAGES VULNÉRABLES (triés par sévérité puis probabilité d'exploitation EPSS) :
+{packages_section if packages_section else "  Aucun package vulnérable détecté."}
+
+MISSION : Génère exactement {n_total_recs} recommandations de sécurité :
+  - {n_dep_recs} recommandation(s) de type "dependency" : UNE PAR PACKAGE listé ci-dessus, dans le même ordre
+  - 1 recommandation de type "global" : processus DevSecOps à mettre en place
+  - 1 recommandation de type "global" : architecture, monitoring, ou bonnes pratiques globales
+
+RÈGLES POUR CHAQUE RECOMMANDATION :
+1. Rédige un paragraphe de 3-5 phrases complètes et actionnables (PAS de listes à puces)
+2. Pour "dependency" : cite le package par son nom exact, donne la commande de mise à jour (pip install, npm install, etc.), explique l'impact concret de la vulnérabilité
+3. Si EPSS >= 0.4 : mentionne explicitement que ce package est activement exploité dans la nature
+4. Si aucun patch disponible : propose une alternative ou une mitigation (isolation, suppression, contournement)
+5. Conclure chaque recommandation par une recommandation binaire : "(À corriger en priorité)" ou "(À planifier)"
+
+Retourne UNIQUEMENT un tableau JSON valide (sans markdown, sans backticks, sans commentaires) :
 [
-  {{
-    "target_type": "dependency",
-    "recommendation_text": "Paragraphe de 3-5 phrases complet et actionnable citant les paquets par nom..."
-  }},
-  ...
+{json_example_deps}
+  {{"target_type": "global", "package": null, "recommendation_text": "..."}},
+  {{"target_type": "global", "package": null, "recommendation_text": "..."}}
 ]"""
     return prompt
 
