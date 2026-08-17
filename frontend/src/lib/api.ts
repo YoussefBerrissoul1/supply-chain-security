@@ -319,11 +319,15 @@ export interface PollCallbacks {
 /**
  * Poll régulièrement le backend jusqu'à ce que l'analyse soit terminée.
  *
+ * @param onReady  Callback optionnel appelé avec une fonction forceTick() juste
+ *                 après le démarrage du polling. Permet d'injecter un tick
+ *                 immédiat depuis l'extérieur (ex: visibilitychange handler).
  * @returns Fonction pour annuler le polling manuellement
  */
 export function pollAnalysisStatus(
   analysisId: number,
   callbacks: PollCallbacks,
+  onReady?: (forceTick: () => void) => void,
 ): () => void {
   let cancelled = false;
   const startedAt = Date.now();

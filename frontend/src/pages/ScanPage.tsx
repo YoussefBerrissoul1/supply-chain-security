@@ -482,8 +482,14 @@ function ScanProgress({ target, inputType, analysisId, onDone, onError }: { targ
     return () => clearInterval(t);
   }, []);
 
+  // Ref vers la fonction de re-trigger (pour visibilitychange)
+  const forcePollRef = useRef<(() => void) | null>(null);
+
   useEffect(() => {
     let lastStatus = '';
+
+    // Expose une fonction de re-trigger accessible par le listener visibilitychange
+    let externalTrigger: (() => void) | null = null;
 
     const cancel = pollAnalysisStatus(analysisId, {
       onProgress: (progress) => {
@@ -531,10 +537,34 @@ function ScanProgress({ target, inputType, analysisId, onDone, onError }: { targ
         setVisibleLines((prev) => [...prev, `[ERREUR] ${msg}`]);
         setTimeout(() => onError(msg), 1200);
       },
+    }, (trigger) => {
+      // Le polling expose son re-trigger via ce callback optionnel
+      externalTrigger = trigger;
+      forcePollRef.current = trigger;
     });
-    return () => cancel();
+
+    // Cleanup
+    forcePollRef.current = null;
+    return () => {
+      cancel();
+      forcePollRef.current = null;
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [analysisId]);
+
+  // Listener visibilitychange — force un tick immédiat au retour sur l'onglet
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && forcePollRef.current) {
+        // L'onglet redevient visible : déclencher un tick immédiat
+        // sans attendre la prochaine échéance du setTimeout
+        setVisibleLines((prev) => [...prev, '[INFO] Reprise de la synchronisation...']);
+        forcePollRef.current();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
 
   return (
     <div className="min-h-screen bg-[#f7f8fb] font-sans">
