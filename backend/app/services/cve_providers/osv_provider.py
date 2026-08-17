@@ -23,6 +23,7 @@ from app.services.cve_providers.base_provider import BaseCVEProvider
 from app.services.cve_providers.models import VulnerabilityResult, cvss_to_severity
 from app.services.cve_providers.utils import (
     http_post_with_retry,
+    http_get_with_retry,
     parse_cvss_v3_base_score,
     cisa_kev,
     osv_cache,
@@ -284,7 +285,62 @@ class OSVProvider(BaseCVEProvider):
             )
             results.append(result)
 
+        # Enrichissement CVSS depuis les aliases GHSA pour les entrées sans score
+        # (les entrées PYSEC n'ont souvent pas de severity[] contrairement aux GHSA)
+        self._enrich_cvss_from_ghsa_aliases(results, vulns_data)
+
         return results
+
+    def _enrich_cvss_from_ghsa_aliases(
+        self,
+        results: list[VulnerabilityResult],
+        vulns_data: list[dict],
+    ) -> None:
+        """
+        Pour les vulnérabilités avec cvss_score=0.0, tente de récupérer
+        le score CVSS depuis l'alias GHSA correspondant via GET /vulns/{ghsa_id}.
+
+        Raison : les entrées PYSEC dans OSV n'incluent souvent pas severity[],
+        alors que leur alias GHSA a toujours un score CVSS v3.
+
+        Les résultats sont écrits directement dans results (in-place).
+        """
+        OSV_VULN_URL = "https://api.osv.dev/v1/vulns/"
+
+        for i, (result, vuln_raw) in enumerate(zip(results, vulns_data)):
+            if result.cvss_score > 0.0:
+                continue  # Déjà un score valide
+
+            # Chercher un alias GHSA dans la vuln brute
+            aliases = vuln_raw.get("aliases", [])
+            ghsa_id = next((a for a in aliases if a.startswith("GHSA-")), None)
+            if not ghsa_id:
+                continue
+
+            cache_key = f"ghsa_cvss_{ghsa_id}"
+            cached_score = osv_cache.get(cache_key)
+            if cached_score is not None:
+                if cached_score > 0.0:
+                    result.cvss_score = cached_score
+                    result.severity = cvss_to_severity(cached_score)
+                continue
+
+            # Requête GET /vulns/{ghsa_id}
+            ghsa_data = http_get_with_retry(f"{OSV_VULN_URL}{ghsa_id}")
+            if not ghsa_data:
+                osv_cache.set(cache_key, 0.0)
+                continue
+
+            ghsa_score = self._extract_cvss(ghsa_data)
+            osv_cache.set(cache_key, ghsa_score)
+
+            if ghsa_score > 0.0:
+                result.cvss_score = ghsa_score
+                result.severity = cvss_to_severity(ghsa_score)
+                logger.debug(
+                    "[OSV CVSS fallback] %s : score enrichi depuis %s → %.1f",
+                    result.cve_id, ghsa_id, ghsa_score
+                )
 
     def _extract_cve_id(self, vuln: dict) -> str:
         """Préfère l'alias CVE-XXXX-YYYY au GHSA ou OSV-ID."""
