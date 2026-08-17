@@ -3,7 +3,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowRight, Download, RefreshCw, Clock, ChevronRight, Layers, Box, Server, HardDrive, History, Loader2, AlertCircle, Wifi, Shield, Copy, Check as CheckIcon } from 'lucide-react';
 import { MagneticButton } from '@/components/MagneticButton';
 import { RiskMatrix } from '@/components/RiskMatrix';
-import { generateReport } from '@/lib/pdf/generateReport';
 import { ScanTimeline, buildTimelineSteps } from '@/components/ScanTimeline';
 import { AnimatedScore } from '@/components/AnimatedScore';
 import {
@@ -13,7 +12,7 @@ import {
   listAnalyses,
   getAnalysis,
   analysisToScanResult,
-  getReportUrl,
+  downloadReport,
   type AnalysisProgressAPI,
   type AnalysisSummaryAPI,
 } from '@/lib/api';
@@ -589,6 +588,7 @@ function ScanResults({ result, onReset }: { result: ScanResult; onReset: () => v
   const tabs = getTabs(result.type);
   const [activeTab, setActiveTab] = useState<string>(tabs[0]);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
   const [aiAnimationFinished, setAiAnimationFinished] = useState(result.isHistorical === true);
   const [copiedSha, setCopiedSha] = useState(false);
 
@@ -598,8 +598,20 @@ function ScanResults({ result, onReset }: { result: ScanResult; onReset: () => v
 
   const handleDownloadPdf = async () => {
     if (isGeneratingPdf) return;
+    const id = result.analysisId;
+    if (!id) {
+      setPdfError('Rapport indisponible : ceté analyse n’a pas d’identifiant.');
+      return;
+    }
+    setPdfError(null);
     setIsGeneratingPdf(true);
-    try { await generateReport(result); } finally { setIsGeneratingPdf(false); }
+    try {
+      await downloadReport(id, result.target);
+    } catch (err: any) {
+      setPdfError(err.message ?? 'Erreur lors du téléchargement du rapport PDF.');
+    } finally {
+      setIsGeneratingPdf(false);
+    }
   };
 
   const handleCopySha = () => {
@@ -669,7 +681,7 @@ function ScanResults({ result, onReset }: { result: ScanResult; onReset: () => v
           <div className="md:ml-auto flex items-center gap-3">
             <button type="button" onClick={onReset} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-[#e4e7f0] text-sm text-[#4b4e5c] hover:border-[#12131a]/30 transition-all"><RefreshCw size={14} /> Nouvelle analyse</button>
             <button type="button" onClick={handleDownloadPdf} disabled={isGeneratingPdf} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-[#e4e7f0] text-sm text-[#4b4e5c] hover:border-[#12131a]/30 transition-all disabled:opacity-50">
-              {isGeneratingPdf ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} {isGeneratingPdf ? 'Génération...' : 'Exporter PDF'}
+              {isGeneratingPdf ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} {isGeneratingPdf ? 'Téléchargement...' : 'Rapport PDF'}
             </button>
           </div>
         </div>
@@ -887,9 +899,18 @@ function ScanResults({ result, onReset }: { result: ScanResult; onReset: () => v
                       className="inline-flex items-center gap-2 px-8 py-3 bg-[#12131a] text-white rounded-full font-semibold hover:bg-[#12131a]/90 hover:shadow-lg hover:shadow-black/10 transition-all disabled:opacity-50 disabled:pointer-events-none"
                     >
                       {isGeneratingPdf ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />} 
-                      {isGeneratingPdf ? 'Génération...' : 'Exporter le rapport'}
+                      {isGeneratingPdf ? 'Téléchargement...' : 'Télécharger le rapport PDF'}
                     </motion.button>
                   </div>
+                  {pdfError && (
+                    <motion.p
+                      initial={{ opacity: 0, y: 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="text-sm text-[#b91c1c] bg-[#fee2e2] px-4 py-2 rounded-lg border border-[#b91c1c]/20 max-w-md text-center"
+                    >
+                      <AlertCircle size={14} className="inline mr-1.5 -mt-0.5" />{pdfError}
+                    </motion.p>
+                  )}
                 </motion.div>
               </motion.div>
             )}

@@ -260,6 +260,41 @@ export function getReportUrl(analysisId: number): string {
 }
 
 /**
+ * Télécharge le rapport PDF généré par le backend (ReportLab — vrai PDF vectoriel).
+ * Crée un objet Blob et déclenche le téléchargement navigateur.
+ *
+ * @throws Error si le backend retourne une erreur (status != 200)
+ */
+export async function downloadReport(analysisId: number, repoName?: string): Promise<void> {
+  const url = getReportUrl(analysisId);
+  const response = await fetch(url, { method: 'GET' });
+
+  if (!response.ok) {
+    let detail = `Erreur ${response.status}`;
+    try {
+      const body = await response.json();
+      detail = body.detail ?? detail;
+    } catch { /* ignore parse error */ }
+    throw new Error(`Impossible de générer le rapport PDF : ${detail}`);
+  }
+
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+
+  // Déclencher le téléchargement via un lien temporaire
+  const link = document.createElement('a');
+  const safeName = (repoName ?? `analyse-${analysisId}`).replace(/[^a-zA-Z0-9_\-]/g, '_');
+  link.href = objectUrl;
+  link.download = `NEXORA_Audit_${safeName}_${new Date().toISOString().split('T')[0]}.pdf`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+
+  // Libérer la mémoire
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 5000);
+}
+
+/**
  * Annule une analyse en cours de manière asynchrone.
  */
 export async function cancelAnalysis(analysisId: number): Promise<{message: string}> {
