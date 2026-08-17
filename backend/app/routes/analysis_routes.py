@@ -947,9 +947,27 @@ def download_report(
     )
 
     if not report or not Path(report.file_path).exists():
+        # Recharger l'analyse avec TOUTES les relations necessaires pour ReportLab.
+        # Sans joinedload, SQLAlchemy ferait du lazy loading qui echoue hors session.
+        analysis_for_pdf = (
+            db.query(Analysis)
+            .options(
+                joinedload(Analysis.dependencies).joinedload(Dependency.vulnerabilities),
+                joinedload(Analysis.docker_result),
+                joinedload(Analysis.recommendations),
+                joinedload(Analysis.reports),
+            )
+            .filter(Analysis.id == analysis_id)
+            .first()
+        )
+        if not analysis_for_pdf:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Analyse #{analysis_id} introuvable lors du chargement pour PDF",
+            )
         # Generer le rapport a la volee si manquant
         try:
-            pdf_path = generate_pdf_report(analysis)
+            pdf_path = generate_pdf_report(analysis_for_pdf)
             if not report:
                 report = Report(
                     analysis_id=analysis_id,
