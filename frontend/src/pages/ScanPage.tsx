@@ -55,6 +55,7 @@ export interface ScanResult {
   date?: string;
   analysisId?: number;
   isHistorical?: boolean;
+  fromCache?: boolean;
   commit_sha?: string;
   coverage_percent?: number;
   analysisStatus?: string;
@@ -671,6 +672,16 @@ function ScanResults({ result, onReset }: { result: ScanResult; onReset: () => v
                 {copiedSha && <motion.span initial={{ opacity: 0, x: -4 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }} className="text-[10px] text-[#15803d] font-semibold">Copié!</motion.span>}
               </div>
             )}
+            {/* Cache badge */}
+            {result.fromCache && (
+              <motion.div
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="inline-flex items-center gap-1.5 text-xs text-[#15803d] bg-[#dcfce7] px-2.5 py-1 rounded-full border border-[#15803d]/20"
+              >
+                <span>⚡</span> Résultat depuis le cache (analyse de moins de 24h)
+              </motion.div>
+            )}
             {/* Coverage warning */}
             {coverageLow && (
               <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="inline-flex items-center gap-1.5 text-xs text-[#b45309] bg-[#fef3c7] px-2.5 py-1 rounded-full border border-[#b45309]/20">
@@ -984,6 +995,22 @@ export function ScanPage() {
       setInputType(type);
       setScanMode(mode);
       setAnalysisId(analysis.id);
+
+      // — Cache hit : le backend retourne une analyse déjà terminée —
+      // Pas besoin de polling. On charge le détail immédiatement et on passe
+      // directement à l'état 'results', sans jamais afficher ScanProgress.
+      if (analysis.status === 'done' || analysis.status === 'incomplete') {
+        const detail = await getAnalysis(analysis.id);
+        const res = analysisToScanResult(detail);
+        res.fromCache = true;
+        saveActiveScan({ phase: 'results', analysisId: analysis.id, target: url, inputType: type, scanMode: mode });
+        saveToHistory(res);
+        setResult(res);
+        setState('results');
+        return;
+      }
+
+      // Scan normal : passe par ScanProgress (polling)
       saveActiveScan({ phase: 'running', analysisId: analysis.id, target: url, inputType: type, scanMode: mode });
       setState('running');
     } catch (err: any) {
