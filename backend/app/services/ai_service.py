@@ -96,7 +96,12 @@ def generate_recommendations(
     if not recommendations_data:
         logger.warning("Aucune IA disponible. Utilisation du fallback statique.")
         provider = "static_fallback"
-        recommendations_data = _generate_static_fallback(score_result, cve_results)
+        recommendations_data = _generate_static_fallback(
+            score_result, cve_results,
+            repo_name=repo_name,
+            ecosystems=ecosystems or [],
+            total_deps=total_deps,
+        )
 
     # Sauvegarder les recommandations dans la base de données
     db_recommendations = []
@@ -237,6 +242,7 @@ def _build_prompt(
     ])
 
     prompt = f"""Tu es un expert senior en cybersécurité spécialisé dans la sécurisation de la chaîne d'approvisionnement logicielle (Software Supply Chain Security).
+Tu rédiges un rapport d'audit professionnel destiné à une équipe technique (développeurs, RSSI, architectes).
 
 CONTEXTE DU PROJET : {repo_name}
   Écosystèmes : {eco_str}
@@ -253,12 +259,14 @@ MISSION : Génère exactement {n_total_recs} recommandations de sécurité :
   - 1 recommandation de type "global" : processus DevSecOps à mettre en place
   - 1 recommandation de type "global" : architecture, monitoring, ou bonnes pratiques globales
 
-RÈGLES POUR CHAQUE RECOMMANDATION :
+RÈGLES ABSOLUES DE TON ET DE CONTENU :
 1. Rédige un paragraphe de 3-5 phrases complètes et actionnables (PAS de listes à puces)
 2. Pour "dependency" : cite le package par son nom exact, donne la commande de mise à jour (pip install, npm install, etc.), explique l'impact concret de la vulnérabilité
-3. Si EPSS >= 0.4 : mentionne explicitement que ce package est activement exploité dans la nature
+3. Si EPSS >= 0.4 : mentionne explicitement que ce package est activement exploité dans la nature et que la fenêtre d'exposition est courte
 4. Si aucun patch disponible : propose une alternative ou une mitigation (isolation, suppression, contournement)
-5. Conclure chaque recommandation par une recommandation binaire : "(À corriger en priorité)" ou "(À planifier)"
+5. Conclure chaque recommandation par une classification de priorité : "(Priorité CRITIQUE — à traiter sous 24h)" ou "(Priorité HAUTE — à planifier sous 72h)" ou "(Priorité NORMALE — à inclure dans le prochain sprint)"
+6. INTERDIT : n'utilise JAMAIS de formulations du type "peut être téléchargé", "à utiliser en toute confiance", "go/no-go", ou tout verdict binaire sur l'usage du logiciel. Un rapport d'audit présente des faits et des recommandations d'action, pas des permissions d'usage.
+7. INTERDIT : n'utilise JAMAIS de formulations génériques interchangeables d'un rapport à l'autre. Chaque recommandation doit prouver qu'elle a été écrite en analysant CE projet précis — mentionne des détails uniques à ce scan : le nom du repo "{repo_name}", le nombre exact de CVE ({score_result.total_cve}), l'écosystème ({eco_str}), la combinaison spécifique de vulnérabilités. Bannir les formules génériques qui s'appliqueraient à n'importe quel projet.
 
 Retourne UNIQUEMENT un tableau JSON valide (sans markdown, sans backticks, sans commentaires) :
 [
@@ -591,24 +599,61 @@ def _clean_json_response(text: str) -> str:
     return text.strip()
 
 
+def _get_ecosystem_audit_cmd(ecosystems: list[str]) -> str:
+    """
+    Retourne la commande d'audit adaptée à l'écosystème détecté.
+    Utilisée par le fallback statique pour personnaliser les recommandations.
+    """
+    eco_lower = [e.lower() for e in ecosystems]
+    if any(e in eco_lower for e in ["python", "pip", "pipenv", "poetry"]):
+        return "`pip-audit --fix` ou `safety scan`"
+    elif any(e in eco_lower for e in ["node", "nodejs", "npm", "yarn"]):
+        return "`npm audit fix --force` ou `yarn audit`"
+    elif any(e in eco_lower for e in ["java", "maven", "gradle"]):
+        return "`mvn dependency:analyze` suivi de `mvn versions:use-latest-releases`"
+    elif any(e in eco_lower for e in ["ruby", "gems", "bundler"]):
+        return "`bundle audit check --update`"
+    elif any(e in eco_lower for e in ["go", "golang"]):
+        return "`govulncheck ./...`"
+    elif any(e in eco_lower for e in ["rust", "cargo"]):
+        return "`cargo audit`"
+    else:
+        return "`pip-audit` (Python), `npm audit` (Node.js), ou `trivy fs .` (multi-écosystème)"
+
+
 def _generate_static_fallback(
     score_result: ScoreResult,
-    cve_results: dict[str, list[VulnerabilityResult]]
+    cve_results: dict[str, list[VulnerabilityResult]],
+    repo_name: str = "inconnu",
+    ecosystems: list[str] | None = None,
+    total_deps: int = 0,
 ) -> list[dict]:
     """
     Système expert de secours basé sur des règles statiques.
-    Génère des recommandations détaillées en format paragraphe si l'IA n'est pas disponible.
+    Gènère des recommandations d'audit professionnelles si l'IA n'est pas disponible.
+
+    v2.0 : ton rapport d'audit professionnel (suppression du langage go/no-go),
+    recommandations contextualisées par écosystème, nombre et nature des CVE.
     """
     logger.info("Génération des recommandations via le système de secours statique")
     recommendations = []
+    ecosystems = ecosystems or []
+    audit_cmd = _get_ecosystem_audit_cmd(ecosystems)
+    eco_str = ", ".join(ecosystems) if ecosystems else "non détecté"
 
-    # Collecter les CVEs critiques et hautes avec tous les détails
-    critical_cves = []
-    high_cves = []
-    medium_cves = []
+    # Collecter les CVEs par niveau
+    critical_cves: list[tuple] = []
+    high_cves: list[tuple] = []
+    medium_cves: list[tuple] = []
+    exploitable_cves: list[tuple] = []  # Celles avec exploit_available=True
+    high_epss_cves: list[tuple] = []   # EPSS >= 0.4 (exploitation active)
 
     for dep_key, vulns in cve_results.items():
+        if dep_key == "__scan_meta__":
+            continue
         for vuln in vulns:
+            if vuln.cve_id.startswith("__"):
+                continue
             sev_val = vuln.severity.value if hasattr(vuln.severity, 'value') else str(vuln.severity)
             if sev_val == "CRITICAL":
                 critical_cves.append((dep_key, vuln))
@@ -616,122 +661,170 @@ def _generate_static_fallback(
                 high_cves.append((dep_key, vuln))
             elif sev_val == "MEDIUM":
                 medium_cves.append((dep_key, vuln))
+            if getattr(vuln, 'exploit_available', False):
+                exploitable_cves.append((dep_key, vuln))
+            if (vuln.epss_score or 0.0) >= 0.4:
+                high_epss_cves.append((dep_key, vuln))
 
-    # Trier par score CVSS décroissant
     critical_cves.sort(key=lambda x: x[1].cvss_score, reverse=True)
     high_cves.sort(key=lambda x: x[1].cvss_score, reverse=True)
 
-    # 1. Recommandation sur les CVEs critiques
+    # ── 1. Recommandation CVE CRITIQUES ──────────────────────────────────────
     if critical_cves:
         top_criticals = critical_cves[:5]
-        pkg_list = []
+        pkg_details = []
         for dep_key, vuln in top_criticals:
             pkg_name = dep_key.split('@')[0]
-            patch = f" (mettre à jour vers la version {vuln.fixed_version})" if vuln.fixed_version else " (aucun patch officiel disponible — envisager une alternative)"
-            exploit_warn = " Cette vulnérabilité a un exploit public connu, rendant l'exploitation triviale." if vuln.exploit_available else ""
-            pkg_list.append(f"{pkg_name} ({vuln.cve_id}, CVSS {vuln.cvss_score}){patch}{exploit_warn}")
+            patch_action = (
+                f"mise à jour vers la version {vuln.fixed_version} disponible"
+                if vuln.fixed_version
+                else "aucun correctif officiel disponible — évaluer un remplacement ou une isolation du composant"
+            )
+            pkg_details.append(f"{pkg_name} ({vuln.cve_id}, CVSS {vuln.cvss_score:.1f} : {patch_action})")
 
-        pkg_text = "; ".join(pkg_list)
+        exploited_count = sum(1 for _, v in top_criticals if v.exploit_available)
+        exploit_context = (
+            f" Parmi ces failles, {exploited_count} font l'objet d'exploits publics connus,"
+            f" réduisant la fenêtre d'exposition à quelques heures en environnement exposé."
+            if exploited_count > 0 else ""
+        )
+
+        # Vary wording based on count : single vs multiple criticals
+        if len(critical_cves) == 1:
+            opening = f"L'audit de {repo_name} a identifié une vulnérabilité de niveau CRITIQUE"
+        else:
+            opening = f"L'audit de {repo_name} a identifié {len(critical_cves)} vulnérabilité(s) de niveau CRITIQUE"
+
         rec_text = (
-            f"URGENT : Ce projet contient {len(critical_cves)} vulnérabilité(s) CRITIQUE(S) nécessitant une action immédiate. "
-            f"Les plus sévères sont : {pkg_text}. "
-            f"Ces failles permettent généralement une exécution de code à distance ou une élévation de privilèges sans authentification, "
-            f"ce qui expose l'ensemble de l'infrastructure. "
-            f"Il est DÉCONSEILLÉ de déployer ce projet en production tant que ces vulnérabilités ne sont pas corrigées. "
-            f"Si vous devez télécharger ce dépôt, isolez-le dans un environnement sandbox sans accès réseau."
+            f"{opening}, susceptibles de permettre une exécution de code à distance"
+            f" ou une élévation de privilèges sans authentification préalable sur les composants exposés.{exploit_context}"
+            f" Composants affectés : {'; '.join(pkg_details)}."
+            f" Une remise en conformité de ces composants est pré-requise avant tout déploiement en environnement accessible depuis un réseau non cloisonné."
+            f" Lancez {audit_cmd} pour effectuer une remise à niveau assistée."
+            f" (Priorité CRITIQUE — à traiter sous 24h)"
         )
         recommendations.append({"target_type": "dependency", "recommendation_text": rec_text})
 
-    # 2. Recommandation sur les CVEs hautes
+    # ── 2. Recommandation CVE HAUTES ────────────────────────────────────────
     if high_cves and len(recommendations) < 3:
         top_highs = high_cves[:4]
-        pkg_list_h = []
+        pkg_updates = []
         for dep_key, vuln in top_highs:
             pkg_name = dep_key.split('@')[0]
-            patch = f"v{vuln.fixed_version}" if vuln.fixed_version else "vérifier la dernière version"
-            pkg_list_h.append(f"{pkg_name} → {patch} ({vuln.cve_id})")
+            if vuln.fixed_version:
+                pkg_updates.append(f"{pkg_name} → v{vuln.fixed_version} ({vuln.cve_id})")
+            else:
+                pkg_updates.append(f"{pkg_name} (aucun correctif — surveiller le bulletin {vuln.cve_id})")
 
-        pkg_text_h = ", ".join(pkg_list_h)
+        # Vary wording based on ecosystem-specific chaining risk
+        chain_risk = ""
+        if len(high_cves) >= 3:
+            chain_risk = (
+                f" La présence simultanée de {len(high_cves)} failles HAUTES dans {repo_name}"
+                f" augmente le risque de compromission par enchaînement"
+                f" (chaining) même en l'absence de vulnérabilité CRITIQUE isolée."
+            )
+
         rec_text_h = (
-            f"Ce projet contient {len(high_cves)} vulnérabilité(s) de sévérité HAUTE (CVSS 7.0-8.9) "
-            f"qui doivent être corrigées dans les 2 prochaines semaines au maximum. "
-            f"Priorité de mise à jour : {pkg_text_h}. "
-            f"Vérifiez également que vos dépendances transitives sont à jour en exécutant `pip audit` (Python), "
-            f"`npm audit fix` (Node.js) ou `mvn dependency:analyze` (Java). "
-            f"Ce projet peut être téléchargé mais NE DOIT PAS être utilisé sans correction de ces failles."
+            f"L'analyse de {repo_name} révèle {len(high_cves)} vulnérabilité(s) de sevérité HAUTE (CVSS 7.0–8.9)"
+            f" dans l'écosystème {eco_str}.{chain_risk}"
+            f" Remise à niveau recommandée : {', '.join(pkg_updates)}."
+            f" Lancez {audit_cmd} pour automatiser la détection des dépendances transitives affectées."
+            f" (Priorité HAUTE — à planifier sous 72h)"
         )
         recommendations.append({"target_type": "dependency", "recommendation_text": rec_text_h})
 
-    # 3. Recommandation Docker si applicable
+    # ── 3. Recommandation Docker si applicable ──────────────────────────────
     if score_result.has_docker:
+        has_critical = bool(critical_cves)
+        base_image_risk = (
+            "Les vulnérabilités CRITIQUES détectées dans les dépendances applicatives"
+            " s'ajoutent aux risques de l'image de base, amplifyant la surface d'attaque."
+            if has_critical else
+            "Même en l'absence de vulnérabilité CRITIQUE dans les dépendances,"
+            " l'image de base constitue un vecteur de risque résiduel à contrôler."
+        )
         docker_rec = (
-            f"Le scan Docker a révélé des vulnérabilités dans l'image de base utilisée par ce projet. "
-            f"Pour sécuriser votre conteneur : (1) Remplacez l'image de base par une version 'slim' ou 'alpine' "
-            f"(ex: FROM python:3.12-slim au lieu de FROM python:3.12) pour réduire la surface d'attaque. "
-            f"(2) Ajoutez 'USER nonroot' dans votre Dockerfile pour éviter l'exécution en tant que root, "
-            f"ce qui limiterait l'impact d'une éventuelle compromission. "
-            f"(3) Activez les scans Trivy automatiques dans votre CI/CD avec 'trivy image votre-image:tag --exit-code 1 --severity CRITICAL'. "
-            f"Un score image faible signifie que même sans vulnérabilités dans votre code, les attaquants peuvent exploiter l'OS sous-jacent."
+            f"Le scan Docker de {repo_name} a relevé des vulnérabilités dans l'image de base du Dockerfile."
+            f" {base_image_risk}"
+            f" Actions correctives : remplacer l'image par une variante 'slim' ou 'distroless' réduisant la surface OS,"
+            f" appliquer la directive 'USER nonroot' pour éliminer l'exécution en contexte root,"
+            f" et intégrer 'trivy image --exit-code 1 --severity CRITICAL,HIGH' dans la pipeline CI/CD."
+            f" (Priorité {'CRITIQUE' if has_critical else 'HAUTE'} — à traiter en parallèle des dépendances applicatives)"
         )
         recommendations.append({"target_type": "docker", "recommendation_text": docker_rec})
 
-    # 4. Recommandation globale selon le score
-    if score_result.final_score < 50:
+    # ── 4. Recommandation globale contextualisée par score et écosystème ─────────
+    total_cve = score_result.total_cve
+    score = score_result.final_score
+
+    if score < 50:
         global_rec = (
-            f"Avec un score de sécurité de {score_result.final_score:.0f}/100 (niveau {score_result.risk_level.value}), "
-            f"ce projet présente des risques sécuritaires sérieux. "
-            f"Nous vous recommandons : (1) D'activer GitHub Dependabot sur ce dépôt (Settings > Security > Dependabot alerts) "
-            f"pour être alerté automatiquement des nouvelles CVE. "
-            f"(2) D'intégrer une étape de sécurité dans votre pipeline CI/CD : ajoutez 'pip-audit' (Python), 'npm audit' (Node.js) "
-            f"ou 'trivy fs .' avant chaque déploiement. "
-            f"(3) D'effectuer un audit complet des licences et dépendances transitives avec 'pip-licenses' ou 'license-checker'. "
-            f"Ne déployez pas ce projet en production sans avoir résolu les vulnérabilités CRITIQUES et HAUTES identifiées."
+            f"Le score de sécurité de {repo_name} ({score:.0f}/100, niveau {score_result.risk_level.value})"
+            f" traduit un profil de risque élevé sur {total_cve} CVE détectées dans l'écosystème {eco_str}."
+            f" Actions structurelles recommandées : activer GitHub Dependabot pour la surveillance continue des CVE,"
+            f" intégrer {audit_cmd} comme étape de blocage dans la pipeline CI/CD,"
+            f" et conduire un audit des dépendances transitives via {audit_cmd}."
+            f" La correction des vulnérabilités CRITIQUES et HAUTES est pré-requise avant promotion en environnement de production."
+            f" (Priorité CRITIQUE — plan de remise en conformité à définir sous 48h)"
         )
-    elif score_result.final_score < 75:
+    elif score < 75:
         global_rec = (
-            f"Avec un score de {score_result.final_score:.0f}/100, ce projet a un niveau de sécurité moyen. "
-            f"Il peut être téléchargé et utilisé en développement avec précaution, mais des corrections sont nécessaires avant production. "
-            f"Planifiez un sprint de sécurité pour traiter les {score_result.total_cve} vulnérabilités identifiées, "
-            f"en commençant par les CRITICAL et HIGH. "
-            f"Configurez un workflow GitHub Actions avec 'actions/dependency-review-action' pour bloquer automatiquement "
-            f"les futures pull requests introduisant de nouvelles CVE. "
-            f"Activez aussi les alertes de sécurité automatiques dans les paramètres de votre dépôt GitHub."
+            f"Avec un score de {score:.0f}/100, {repo_name} présente un niveau de risque intermédiaire"
+            f" sur {total_cve} CVE en écosystème {eco_str}."
+            f" Planifiez un sprint de remise en conformité couvrant les {len(critical_cves)} CRITIQUE(S)"
+            f" et {len(high_cves)} HAUTE(S) en priorité."
+            f" Configurez 'actions/dependency-review-action' dans GitHub Actions pour bloquer automatiquement"
+            f" les pull requests introduisant de nouvelles CVE."
+            f" (Priorité HAUTE — à inclure dans le prochain cycle de développement)"
         )
     else:
         global_rec = (
-            f"Avec un score de {score_result.final_score:.0f}/100 (niveau {score_result.risk_level.value}), "
-            f"ce projet a un bon niveau de sécurité et peut être téléchargé et utilisé en toute confiance. "
-            f"Pour maintenir ce niveau : automatisez les mises à jour avec Dependabot ou Renovate Bot, "
-            f"et effectuez un audit mensuel avec 'pip-audit' ou 'npm audit'. "
-            f"Restez vigilant sur les nouvelles CVE publiées en vous abonnant aux bulletins de sécurité des écosystèmes utilisés "
-            f"(ex: Python Security Advisories, npm Security Advisories). "
-            f"Ce projet montre de bonnes pratiques de maintenance — continuez ainsi !"
+            f"Le score de sécurité de {repo_name} ({score:.0f}/100, {score_result.risk_level.value})"
+            f" reflète un profil de risque maîtrisé sur {total_cve} CVE analysées en écosystème {eco_str}."
+            f" Pour maintenir ce niveau : automatisez la surveillance avec Dependabot ou Renovate Bot,"
+            f" exécutez {audit_cmd} à chaque cycle de release,"
+            f" et abonnez-vous aux bulletins de sécurité des écosystèmes concernés."
+            f" (Priorité NORMALE — à intégrer dans la politique de maintenance continue)"
         )
     recommendations.append({"target_type": "global", "recommendation_text": global_rec})
 
-    # 5. Recommandation sur les médecines préventives
+    # ── 5. CVE MEDIUM ou recommandation de maîtrise préventive ─────────────────
     if medium_cves:
-        med_names = list(set(dep_key.split('@')[0] for dep_key, _ in medium_cves[:6]))
+        med_packages = list(dict.fromkeys(dep_key.split('@')[0] for dep_key, _ in medium_cves[:6]))
+        # Contexte spécifique selon nombre de MEDIUM
+        if len(medium_cves) == 1:
+            med_context = f"une vulnérabilité de niveau MEDIUM a été identifiée dans {repo_name}"
+        elif len(medium_cves) <= 4:
+            med_context = f"{len(medium_cves)} vulnérabilités MEDIUM ont été relevées dans {repo_name}"
+        else:
+            med_context = f"{len(medium_cves)} vulnérabilités MEDIUM constituent un risque cumulatif dans {repo_name}"
+
+        # Chaining risk based on count
+        chain_note = (
+            f" Leur combinaison potentielle (chaining) peut aboutir à un accès non autorisé"
+            f" selon la configuration déploiement de {repo_name}."
+            if len(medium_cves) >= 3 else ""
+        )
+
         med_rec = (
-            f"En plus des vulnérabilités critiques et hautes, {len(medium_cves)} vulnérabilité(s) de niveau MEDIUM "
-            f"ont été détectées sur les paquets suivants : {', '.join(med_names)}. "
-            f"Bien que ces failles soient moins urgentes, elles peuvent être combinées (technique de 'chaining') "
-            f"pour obtenir des accès non autorisés dans certaines configurations. "
-            f"Planifiez leur correction dans les 30 prochains jours. "
-            f"Pour Python, utilisez 'pip list --outdated | pip install --upgrade' ; "
-            f"pour Node.js, exécutez 'npx npm-check-updates -u && npm install'. "
-            f"Validez toujours les mises à jour avec vos tests unitaires et d'intégration avant déploiement."
+            f"Outre les niveaux CRITIQUE et HAUTE, {med_context} sur les composants :"
+            f" {', '.join(med_packages)} (ecosystème {eco_str}).{chain_note}"
+            f" Planifiez leur correction dans les 30 prochains jours."
+            f" Utilisez {audit_cmd} pour automatiser le traitement."
+            f" (Priorité NORMALE — à intégrer dans le prochain sprint)"
         )
         recommendations.append({"target_type": "dependency", "recommendation_text": med_rec})
     elif not recommendations or len(recommendations) < 4:
-        # Recommandation générique si peu de CVEs
+        # Profil bas risque : recommandation de veille active
         gen_rec = (
-            f"Ce projet a peu de vulnérabilités connues dans les dépendances analysées ({score_result.total_cve} CVE au total). "
-            f"Pour maintenir ce niveau de sécurité, implémentez une politique de mise à jour régulière : "
-            f"vérifiez les nouvelles versions de chaque dépendance au moins une fois par mois et après chaque incident de sécurité majeur "
-            f"dans l'écosystème concerné. "
-            f"Activez les notifications GitHub Dependabot pour être alerté immédiatement en cas de nouvelles CVE. "
-            f"Ce projet peut être téléchargé et utilisé en toute sécurité selon l'analyse effectuée."
+            f"L'analyse de {repo_name} ({total_cve} CVE en écosystème {eco_str})"
+            f" n'identifie pas de vulnérabilités CRITIQUE ni HAUTE dans les {total_deps} dépendances examinées."
+            f" Le profil de risque résiduel est maîtrisé."
+            f" Maintenez ce niveau en automatisant la surveillance avec Dependabot et en exécutant"
+            f" {audit_cmd} à chaque cycle de release."
+            f" Abonnez-vous aux bulletins de sécurité des dépendances clés pour anticiper les divulgations à venir."
+            f" (Priorité NORMALE — politique de maintenance continue)"
         )
         recommendations.append({"target_type": "global", "recommendation_text": gen_rec})
 
