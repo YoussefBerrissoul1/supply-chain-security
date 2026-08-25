@@ -5,6 +5,7 @@ import { MagneticButton } from '@/components/MagneticButton';
 import { RiskMatrix } from '@/components/RiskMatrix';
 import { ScanTimeline, buildTimelineSteps } from '@/components/ScanTimeline';
 import { AnimatedScore } from '@/components/AnimatedScore';
+import { generateReport } from '@/lib/pdf/generateReport';
 import {
   startGithubAnalysis,
   startDockerAnalysis,
@@ -12,7 +13,6 @@ import {
   listAnalyses,
   getAnalysis,
   analysisToScanResult,
-  downloadReport,
   type AnalysisProgressAPI,
   type AnalysisSummaryAPI,
 } from '@/lib/api';
@@ -629,17 +629,12 @@ function ScanResults({ result, onReset }: { result: ScanResult; onReset: () => v
 
   const handleDownloadPdf = async () => {
     if (isGeneratingPdf) return;
-    const id = result.analysisId;
-    if (!id) {
-      setPdfError('Rapport indisponible : ceté analyse n’a pas d’identifiant.');
-      return;
-    }
     setPdfError(null);
     setIsGeneratingPdf(true);
     try {
-      await downloadReport(id, result.target);
+      await generateReport(result);
     } catch (err: any) {
-      setPdfError(err.message ?? 'Erreur lors du téléchargement du rapport PDF.');
+      setPdfError(err.message ?? 'Erreur lors de la generation du rapport PDF.');
     } finally {
       setIsGeneratingPdf(false);
     }
