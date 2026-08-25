@@ -231,6 +231,34 @@ def _build_prompt(
         if v > 0
     )
 
+    # Instruction Docker : interdiction explicite si pas de Dockerfile
+    if not score_result.has_docker:
+        docker_instruction = (
+            "8. INTERDIT ABSOLU (DOCKERFILE) : Dockerfile présent = NON. "
+            "Tu ne dois JAMAIS mentionner Docker, Dockerfile, image de base, Trivy, "
+            "registre Docker, 'USER nonroot', ou tout concept lié à la conteneurisation dans tes recommandations. "
+            "Aucune recommandation de type 'docker' ne doit exister. "
+            "Ne génère QUE des recommandations de type 'dependency' et 'global' portant sur les dépendances logicielles."
+        )
+    else:
+        docker_instruction = (
+            "8. Dockerfile présent : OUI — Si le scan Docker a relevé des vulnérabilités réelles, "
+            "tu peux inclure une recommandation Docker. "
+            f"Vulnérabilités Docker détectées : {score_result.docker_vulns_count if hasattr(score_result, 'docker_vulns_count') else 'non précisé'}."
+        )
+
+    # Règle spécificité CVE : imposer citation explicite même sans CRITICAL/HIGH
+    cve_specificity_rule = ""
+    if score_result.total_cve > 0:
+        cve_specificity_rule = (
+            f"9. SPÉCIFICITÉ CVE OBLIGATOIRE : Ce scan a détecté {score_result.total_cve} CVE. "
+            "Chaque recommandation de type 'dependency' DOIT citer : (a) le nom exact du package, "
+            "(b) au moins 1 CVE-ID précis (ex: CVE-2024-XXXX) parmi les CVE listées ci-dessus pour ce package, "
+            "(c) le score CVSS de cette CVE. "
+            "INTERDIT de produire une recommandation qui parle d'un package sans citer le moindre CVE-ID précis. "
+            "Même si toutes les CVE sont LOW ou MEDIUM, tu dois quand même les citer par leur ID exact."
+        )
+
     # Nombre de recommandations attendues : 1 par package (max 15) + 2 globales
     n_dep_recs = min(len(packages_for_json), 15)
     n_total_recs = n_dep_recs + 2  # + DevSecOps global + Docker/Architecture
@@ -249,7 +277,7 @@ CONTEXTE DU PROJET : {repo_name}
   Dépendances totales : {total_deps}
   Score de sécurité : {score_result.final_score}/100 (niveau : {score_result.risk_level.value})
   CVE détectées : {score_result.total_cve} ({cve_counts_str if cve_counts_str else "aucune"})
-  Dockerfile présent : {"Oui" if score_result.has_docker else "Non"}
+  Dockerfile présent : {"Oui" if score_result.has_docker else "Non — AUCUNE recommandation Docker autorisée"}
 
 PACKAGES VULNÉRABLES (triés par sévérité puis probabilité d'exploitation EPSS) :
 {packages_section if packages_section else "  Aucun package vulnérable détecté."}
@@ -267,6 +295,8 @@ RÈGLES ABSOLUES DE TON ET DE CONTENU :
 5. Conclure chaque recommandation par une classification de priorité : "(Priorité CRITIQUE — à traiter sous 24h)" ou "(Priorité HAUTE — à planifier sous 72h)" ou "(Priorité NORMALE — à inclure dans le prochain sprint)"
 6. INTERDIT : n'utilise JAMAIS de formulations du type "peut être téléchargé", "à utiliser en toute confiance", "go/no-go", ou tout verdict binaire sur l'usage du logiciel. Un rapport d'audit présente des faits et des recommandations d'action, pas des permissions d'usage.
 7. INTERDIT : n'utilise JAMAIS de formulations génériques interchangeables d'un rapport à l'autre. Chaque recommandation doit prouver qu'elle a été écrite en analysant CE projet précis — mentionne des détails uniques à ce scan : le nom du repo "{repo_name}", le nombre exact de CVE ({score_result.total_cve}), l'écosystème ({eco_str}), la combinaison spécifique de vulnérabilités. Bannir les formules génériques qui s'appliqueraient à n'importe quel projet.
+{docker_instruction}
+{cve_specificity_rule}
 
 Retourne UNIQUEMENT un tableau JSON valide (sans markdown, sans backticks, sans commentaires) :
 [
@@ -737,21 +767,36 @@ def _generate_static_fallback(
     # ── 3. Recommandation Docker si applicable ──────────────────────────────
     if score_result.has_docker:
         has_critical = bool(critical_cves)
-        base_image_risk = (
-            "Les vulnérabilités CRITIQUES détectées dans les dépendances applicatives"
-            " s'ajoutent aux risques de l'image de base, amplifyant la surface d'attaque."
-            if has_critical else
-            "Même en l'absence de vulnérabilité CRITIQUE dans les dépendances,"
-            " l'image de base constitue un vecteur de risque résiduel à contrôler."
-        )
-        docker_rec = (
-            f"Le scan Docker de {repo_name} a relevé des vulnérabilités dans l'image de base du Dockerfile."
-            f" {base_image_risk}"
-            f" Actions correctives : remplacer l'image par une variante 'slim' ou 'distroless' réduisant la surface OS,"
-            f" appliquer la directive 'USER nonroot' pour éliminer l'exécution en contexte root,"
-            f" et intégrer 'trivy image --exit-code 1 --severity CRITICAL,HIGH' dans la pipeline CI/CD."
-            f" (Priorité {'CRITIQUE' if has_critical else 'HAUTE'} — à traiter en parallèle des dépendances applicatives)"
-        )
+        docker_vulns = getattr(score_result, 'docker_vulns_count', None)
+        has_docker_vulns = docker_vulns is not None and docker_vulns > 0
+
+        if has_docker_vulns:
+            base_image_risk = (
+                "Les vuln\u00e9rabilit\u00e9s CRITIQUES d\u00e9tect\u00e9es dans les d\u00e9pendances applicatives"
+                " s'ajoutent aux risques de l'image de base, amplifiant la surface d'attaque."
+                if has_critical else
+                "M\u00eame en l'absence de vuln\u00e9rabilit\u00e9 CRITIQUE dans les d\u00e9pendances,"
+                " l'image de base constitue un vecteur de risque r\u00e9siduel \u00e0 contr\u00f4ler."
+            )
+            docker_rec = (
+                f"Le scan Docker de {repo_name} a relev\u00e9 {docker_vulns} vuln\u00e9rabilit\u00e9(s) OS dans l'image de base du Dockerfile."
+                f" {base_image_risk}"
+                f" Actions correctives : remplacer l'image par une variante 'slim' ou 'distroless' r\u00e9duisant la surface OS,"
+                f" appliquer la directive 'USER nonroot' pour \u00e9liminer l'ex\u00e9cution en contexte root,"
+                f" et int\u00e9grer 'trivy image --exit-code 1 --severity CRITICAL,HIGH' dans la pipeline CI/CD."
+                f" (Priorit\u00e9 {'CRITIQUE' if has_critical else 'HAUTE'} \u2014 \u00e0 traiter en parall\u00e8le des d\u00e9pendances applicatives)"
+            )
+        else:
+            # Dockerfile pr\u00e9sent mais 0 vuln\u00e9rabilit\u00e9 OS : bonne pratique sans hallucination
+            docker_rec = (
+                f"Un Dockerfile a \u00e9t\u00e9 d\u00e9tect\u00e9 dans {repo_name}. Le scan d'image n'a relev\u00e9 aucune vuln\u00e9rabilit\u00e9 OS critique."
+                f" Pour maintenir ce niveau de s\u00e9curit\u00e9, appliquez les bonnes pratiques de hardening de conteneur :"
+                f" utiliser une image de base minimale ('slim' ou 'distroless'), s'assurer que l'application"
+                f" s'ex\u00e9cute avec un utilisateur non-root (directive USER dans le Dockerfile),"
+                f" et int\u00e9grer 'trivy image --exit-code 1 --severity CRITICAL,HIGH' comme \u00e9tape de validation CI/CD"
+                f" pour d\u00e9tecter toute r\u00e9gression lors de futures mises \u00e0 jour de l'image de base."
+                f" (Priorit\u00e9 NORMALE \u2014 bonne pratique de maintenance continue)"
+            )
         recommendations.append({"target_type": "docker", "recommendation_text": docker_rec})
 
     # ── 4. Recommandation globale contextualisée par score et écosystème ─────────
