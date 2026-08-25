@@ -255,28 +255,27 @@ def clone_repository(repo_url: str) -> Path:
         # Préparer les options de clonage
         clone_multi_options = ["--filter=blob:none"]
 
-        # Injecter le token GitHub de manière SÉCURISÉE via un header HTTP
-        # (et non dans l'URL qui serait loggée par Git dans .git/config)
+        # Injecter le token GitHub via variable d'environnement Git
+        # (évite l'option -c qui est bloquée par GitPython >= 3.1.37 pour sécurité)
+        git_env = {
+            "GIT_HTTP_LOW_SPEED_LIMIT": "1000",
+            "GIT_HTTP_LOW_SPEED_TIME": "60",
+            "GIT_TERMINAL_PROMPT": "0",
+        }
         if settings.GITHUB_TOKEN:
-            # Encode le token dans un header Authorization — jamais dans l'URL
-            clone_multi_options.append(
-                f"-c http.extraHeader=Authorization: Basic {settings.GITHUB_TOKEN}"
-            )
+            # GIT_HTTP_EXTRAHEADER est l'équivalent env de -c http.extraHeader
+            # Le token n'apparaît jamais dans l'URL ni dans .git/config
+            git_env["GIT_HTTP_EXTRAHEADER"] = f"Authorization: Basic {settings.GITHUB_TOKEN}"
 
         Repo.clone_from(
             url=repo_url,           # URL sans token (propre)
             to_path=str(clone_path),
             depth=1,                # Clone superficiel — dernier commit seulement
             single_branch=True,
-            env={
-                # Timeout Git : coupe si vitesse < 1Ko/s pendant 60s
-                "GIT_HTTP_LOW_SPEED_LIMIT": "1000",
-                "GIT_HTTP_LOW_SPEED_TIME": "60",
-                # Désactiver l'invite de mot de passe interactive (CI/CD)
-                "GIT_TERMINAL_PROMPT": "0",
-            },
+            env=git_env,
             multi_options=clone_multi_options
         )
+
 
         # Calculer le temps de clonage
         elapsed = round(time.time() - start_time, 1)
