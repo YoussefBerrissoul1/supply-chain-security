@@ -151,7 +151,18 @@ function timeAgo(iso: string): string {
 /* ─────────────────────────────────────────────────────────────────────────────
    Sub-components
 ──────────────────────────────────────────────────────────────────────────────*/
+const MAX_TERMINAL_LINES = 100;
+
 function TerminalPanel({ lines, showCursor = false }: { lines: string[]; showCursor?: boolean }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll vers le bas à chaque nouvelle ligne
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [lines]);
+
   return (
     <div className="bg-[#0d0f17] rounded-2xl border border-white/10 overflow-hidden shadow-xl">
       <div className="bg-[#1a1d27] px-4 py-3 flex items-center border-b border-white/5">
@@ -162,15 +173,21 @@ function TerminalPanel({ lines, showCursor = false }: { lines: string[]; showCur
         </div>
         <div className="flex-1 text-center text-xs font-mono text-[#8a8d9c]">nexora — terminal</div>
       </div>
-      <div className="p-6 font-mono text-sm min-h-[220px] space-y-1.5">
+      {/* Hauteur max fixe + scroll interne — ne grandit JAMAIS la page */}
+      <div
+        ref={scrollRef}
+        className="p-6 font-mono text-sm space-y-1.5 overflow-y-auto"
+        style={{ minHeight: '220px', maxHeight: '420px' }}
+      >
         {lines.map((line, i) => {
           const color =
             line.startsWith('[WARN]') ? 'text-[#b45309]' :
               line.startsWith('[OK]') ? 'text-[#15803d]' :
-                line.startsWith('$') ? 'text-white' :
-                  'text-gray-400';
+                line.startsWith('[ERREUR]') ? 'text-red-400' :
+                  line.startsWith('$') ? 'text-white' :
+                    'text-gray-400';
           return (
-            <motion.div key={i} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.2, delay: i * 0.05 }} className={color}>
+            <motion.div key={i} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.2 }} className={color}>
               {line}
             </motion.div>
           );
@@ -182,6 +199,7 @@ function TerminalPanel({ lines, showCursor = false }: { lines: string[]; showCur
     </div>
   );
 }
+
 
 function AITerminal({ text, isFinished, onFinish }: { text: string; isFinished: boolean; onFinish: () => void }) {
   const [bootPhase, setBootPhase] = useState(0);
@@ -468,12 +486,18 @@ function ScanProgress({ target, inputType, analysisId, onDone, onError }: { targ
   const startTime = useRef(Date.now());
   const isDocker = inputType === 'docker';
 
-  // Timeline state — déduit des données réelles de progression
   const [hasStarted, setHasStarted] = useState(false);
   const [depsFound, setDepsFound] = useState(0);
   const [vulnsFound, setVulnsFound] = useState(0);
   const [recsFound, setRecsFound] = useState(0);
   const [isDone, setIsDone] = useState(false);
+
+  // Refs pour éviter le problème de stale closure dans le useEffect de polling.
+  // L'effet a [analysisId] comme dépendance, donc les valeurs de state
+  // capturées dans la closure restent figées à 0 — les refs sont synchrones.
+  const depsFoundRef  = useRef(0);
+  const vulnsFoundRef = useRef(0);
+  const recsFoundRef  = useRef(0);
 
   const timelineSteps = buildTimelineSteps({ isDocker, hasStarted, depsFound, vulnsFound, recsFound, isDone });
 
@@ -502,23 +526,39 @@ function ScanProgress({ target, inputType, analysisId, onDone, onError }: { targ
           }
           lastStatus = progress.status;
         }
-        if (progress.total_deps > depsFound) {
+        // Utilise les refs (pas le state) pour comparer — évite la stale closure
+        if (progress.total_deps > depsFoundRef.current) {
+          depsFoundRef.current = progress.total_deps;
           setDepsFound(progress.total_deps);
           newLines.push(`[INFO] ${progress.total_deps} dépendance(s) détectée(s)...`);
         }
-        if (progress.total_vulns > vulnsFound) {
-          const delta = progress.total_vulns - vulnsFound;
+        if (progress.total_vulns > vulnsFoundRef.current) {
+          const delta = progress.total_vulns - vulnsFoundRef.current;
           const crit = progress.vulns_by_severity['CRITICAL'] ?? 0;
+          vulnsFoundRef.current = progress.total_vulns;
           setVulnsFound(progress.total_vulns);
           newLines.push(`[WARN] ${delta} nouvelle(s) CVE détectée(s) — dont ${crit} CRITIQUE(S)`);
         }
-        if (progress.total_recommendations > 0) {
+        if (progress.total_recommendations > recsFoundRef.current) {
+          recsFoundRef.current = progress.total_recommendations;
           setRecsFound(progress.total_recommendations);
-          if (!visibleLines.some(l => l.includes('IA'))) {
-            newLines.push('[INFO] Génération des recommandations IA...');
-          }
+          newLines.push('[INFO] Génération des recommandations IA...');
         }
-        if (newLines.length > 0) setVisibleLines((prev) => [...prev, ...newLines]);
+        if (newLines.length > 0) {
+          setVisibleLines((prev) => {
+            // Dédupliquer : ne pas ajouter si identique à la dernière ligne
+            const filtered = newLines.filter((line, idx) => {
+              const prevLine = idx === 0 ? prev[prev.length - 1] : newLines[idx - 1];
+              return line !== prevLine;
+            });
+            if (filtered.length === 0) return prev;
+            // Limite : garder les MAX_TERMINAL_LINES dernières lignes
+            const combined = [...prev, ...filtered];
+            return combined.length > MAX_TERMINAL_LINES
+              ? combined.slice(combined.length - MAX_TERMINAL_LINES)
+              : combined;
+          });
+        }
       },
       onDone: (analysis) => {
         setIsDone(true);
@@ -776,7 +816,7 @@ function ScanResults({ result, onReset }: { result: ScanResult; onReset: () => v
                         <th className="text-left px-6 py-3 font-semibold text-[#12131a]">CVE ID</th>
                         <th className="text-left px-6 py-3 font-semibold text-[#12131a]">Sévérité</th>
                         <th className="text-left px-6 py-3 font-semibold text-[#12131a]">Paquet</th>
-                        <th className="text-left px-6 py-3 font-semibold text-[#12131a] hidden md:table-cell">Correctif</th>
+
                         <th className="text-right px-6 py-3 font-semibold text-[#12131a]">CVSS</th>
                       </tr>
                     </thead>
@@ -800,13 +840,6 @@ function ScanResults({ result, onReset }: { result: ScanResult; onReset: () => v
                           </td>
                           <td className="px-6 py-4"><span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: `${severityColor(v.severity)}18`, color: severityColor(v.severity) }}>{v.severity}</span></td>
                           <td className="px-6 py-4 font-mono text-xs text-[#4b4e5c] max-w-[140px] truncate">{v.pkg}</td>
-                          <td className="px-6 py-4 hidden md:table-cell">
-                            {v.fixed_version ? (
-                              <span className="text-xs text-[#15803d] font-mono font-semibold">→ v{v.fixed_version}</span>
-                            ) : (
-                              <span className="text-xs text-[#8a8d9c]">Aucun patch</span>
-                            )}
-                          </td>
                           <td className="px-6 py-4 text-right font-bold font-mono" style={{ color: severityColor(v.severity) }}>{v.score ? v.score.toFixed(1) : 'N/A'}</td>
                         </motion.tr>
                       ))}
