@@ -771,6 +771,7 @@ def create_analysis(
     existing = db.query(Analysis).filter(
         Analysis.repo_url == validated_url,
         Analysis.target_type == "github",
+        Analysis.scan_type == scan_type,
         Analysis.status.in_([AnalysisStatus.PENDING, AnalysisStatus.RUNNING]),
     ).first()
     if existing:

@@ -1,8 +1,8 @@
 """
 Service IA — génère des recommandations de sécurité personnalisées pour une analyse.
-Stratégie de fallback (Gemini → NVIDIA NIM / Kimi K2.6 → OpenRouter → Statique) :
+Stratégie de fallback (Gemini → Groq → OpenRouter → Statique) :
   1. Gemini (principal — gemini-2.5-flash)
-  2. NVIDIA NIM / Kimi K2.6 (fallback intermédiaire — moonshotai/kimi-k2.6)
+  2. Groq (fallback intermédiaire — llama-3.3-70b-versatile, 14 400 req/jour gratuit)
   3. OpenRouter (dernier fallback LLM)
   4. Système expert statique (rule-based — toujours disponible)
 
@@ -68,19 +68,18 @@ def generate_recommendations(
     else:
         logger.info("Gemini ignoré (clé absente ou invalide) — passage au fallback suivant")
 
-    # ── Étape 2 : NVIDIA NIM / Kimi K2.6 (fallback intermédiaire) ────────────
+    # ── Étape 2 : Groq (fallback intermédiaire) ───────────────────────────────
     # Appelé uniquement si Gemini a échoué ou n'est pas configuré
-    nvidia_key = settings.NVIDIA_API_KEY or ""
-    if not recommendations_data and nvidia_key:
+    if not recommendations_data and settings.GROQ_API_KEY:
         try:
-            recommendations_data = _generate_with_nvidia(score_result, cve_results, repo_name, ecosystems, total_deps)
-            provider = "nvidia_kimi_k2"
-            logger.info("Recommandations générées avec succès via NVIDIA NIM / Kimi K2.6 (%d recs)", len(recommendations_data))
+            recommendations_data = _generate_with_groq(score_result, cve_results, repo_name, ecosystems, total_deps)
+            provider = "groq"
+            logger.info("Recommandations générées avec succès via Groq (%d recs)", len(recommendations_data))
         except Exception as e:
-            logger.error("Échec de la génération avec NVIDIA NIM : %s", e)
+            logger.error("Échec de la génération avec Groq : %s", e)
             recommendations_data = []
-    elif not recommendations_data and not nvidia_key:
-        logger.info("NVIDIA NIM ignoré (NVIDIA_API_KEY absente) — passage à OpenRouter")
+    elif not recommendations_data and not settings.GROQ_API_KEY:
+        logger.info("Groq ignoré (GROQ_API_KEY absente) — passage à OpenRouter")
 
     # ── Étape 3 : OpenRouter (dernier fallback LLM) ───────────────────────────
     if not recommendations_data and settings.OPENROUTER_API_KEY:
@@ -516,6 +515,157 @@ def _generate_with_nvidia(
     )
 
 
+def _generate_with_groq(
+    score_result: ScoreResult,
+    cve_results: dict[str, list[VulnerabilityResult]],
+    repo_name: str = "inconnu",
+    ecosystems: list[str] | None = None,
+    total_deps: int = 0,
+) -> list[dict]:
+    """
+    Appelle l'API Groq (OpenAI-compatible) — fallback intermédiaire après Gemini.
+
+    Endpoint : POST https://api.groq.com/openai/v1/chat/completions
+    Auth      : Bearer ${GROQ_API_KEY}
+    Timeout   : 60 secondes
+    Retries   : 3 tentatives par modèle en cas de 429
+
+    Modèles essayés dans l'ordre :
+        1. llama-3.3-70b-versatile  (meilleur rapport qualité/vitesse)
+        2. openai/gpt-oss-120b      (fallback si le premier est saturé)
+
+    Cette fonction ne participe PAS à la détection CVE ni au Security Score.
+    Elle génère uniquement des recommandations textuelles basées sur les résultats.
+
+    Retourne :
+        list[dict] avec clés "target_type" et "recommendation_text"
+
+    Lève :
+        Exception si tous les modèles échouent après tous les retries
+    """
+    GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+    TIMEOUT = 60
+    MAX_RETRIES = 3
+
+    prompt = _build_prompt(score_result, cve_results, repo_name, ecosystems, total_deps)
+
+    headers = {
+        "Authorization": f"Bearer {settings.GROQ_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    models_to_try = [
+        "llama-3.3-70b-versatile",
+        "openai/gpt-oss-120b",
+    ]
+
+    last_error: Exception | None = None
+
+    for model in models_to_try:
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                payload = {
+                    "model": model,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": (
+                                "Tu es un expert en cybersécurité spécialisé en Software Supply Chain Security. "
+                                "Tu réponds UNIQUEMENT avec du JSON valide (tableau), sans aucun texte avant ou après."
+                            ),
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    "temperature": 0.7,
+                    "max_tokens": 2000,
+                }
+
+                with httpx.Client(timeout=TIMEOUT) as client:
+                    response = client.post(GROQ_API_URL, json=payload, headers=headers)
+
+                if response.status_code == 401:
+                    raise PermissionError(
+                        "Groq : clé API invalide (401). "
+                        "Vérifiez GROQ_API_KEY dans votre .env"
+                    )
+
+                if response.status_code == 429:
+                    wait = 8 * attempt  # 8s, 16s, 24s
+                    logger.warning(
+                        "[Groq] Rate-limit 429 sur '%s' — attente %ds (tentative %d/%d)",
+                        model, wait, attempt, MAX_RETRIES
+                    )
+                    time.sleep(wait)
+                    last_error = Exception(f"Groq rate-limit 429 sur {model} (tentative {attempt})")
+                    continue
+
+                if response.status_code >= 500:
+                    logger.warning(
+                        "[Groq] Erreur serveur %d sur '%s' (tentative %d/%d)",
+                        response.status_code, model, attempt, MAX_RETRIES
+                    )
+                    time.sleep(5 * attempt)
+                    last_error = Exception(f"Groq erreur serveur {response.status_code} sur {model}")
+                    continue
+
+                response.raise_for_status()
+
+                data = response.json()
+                choices = data.get("choices", [])
+                if not choices:
+                    raise ValueError(f"Groq : réponse vide (aucun choix) pour {model}")
+
+                content = choices[0].get("message", {}).get("content") or ""
+                raw_text = content.strip()
+                if not raw_text:
+                    raise ValueError(f"Groq a renvoyé un content vide pour le modèle {model}")
+
+                clean_text = _clean_json_response(raw_text)
+                result = json.loads(clean_text)
+
+                if not isinstance(result, list) or len(result) == 0:
+                    raise ValueError(f"Groq : JSON retourné vide ou invalide pour {model}")
+
+                logger.info(
+                    "[Groq] Modèle '%s' a généré %d recommandation(s) avec succès",
+                    model, len(result)
+                )
+                return result
+
+            except PermissionError:
+                raise
+
+            except httpx.TimeoutException:
+                logger.warning(
+                    "[Groq] Timeout (%ds) sur '%s' tentative %d/%d",
+                    TIMEOUT, model, attempt, MAX_RETRIES
+                )
+                last_error = TimeoutError(f"Groq timeout après {TIMEOUT}s sur {model}")
+                if attempt < MAX_RETRIES:
+                    time.sleep(3)
+
+            except json.JSONDecodeError as e:
+                logger.warning("[Groq] JSON invalide dans la réponse de '%s' : %s", model, e)
+                last_error = e
+                break  # JSON invalide = passer au modèle suivant
+
+            except Exception as e:
+                logger.warning(
+                    "[Groq] Erreur inattendue sur '%s' (tentative %d/%d) : %s",
+                    model, attempt, MAX_RETRIES, e
+                )
+                last_error = e
+                if attempt < MAX_RETRIES:
+                    time.sleep(3)
+                else:
+                    break  # Tentatives épuisées pour ce modèle
+
+    raise Exception(
+        f"Groq indisponible après tous les modèles/tentatives. "
+        f"Dernière erreur : {last_error}"
+    )
+
+
 def _generate_with_openrouter(
     score_result: ScoreResult,
     cve_results: dict[str, list[VulnerabilityResult]],
@@ -582,7 +732,10 @@ def _generate_with_openrouter(
                 response.raise_for_status()
                 data = response.json()
 
-                text = data["choices"][0]["message"]["content"].strip()
+                content = data["choices"][0]["message"].get("content") or ""
+                text = content.strip()
+                if not text:
+                    raise ValueError(f"OpenRouter a renvoyé un content vide pour le modèle {model}")
                 text = _clean_json_response(text)
 
                 result = json.loads(text)

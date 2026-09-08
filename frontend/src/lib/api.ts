@@ -187,6 +187,7 @@ async function apiFetch<T>(
 export async function startGithubAnalysis(
   repoUrl: string,
   scanType: ScanType = 'standard',
+  forceRescan = false,
 ): Promise<AnalysisSummaryAPI> {
   return apiFetch<AnalysisSummaryAPI>('/analyze', {
     method: 'POST',
@@ -194,6 +195,7 @@ export async function startGithubAnalysis(
       repo_url: repoUrl,
       scan_type: scanType,
       target_type: 'github',
+      force_rescan: forceRescan,
     }),
   });
 }
@@ -205,6 +207,7 @@ export async function startGithubAnalysis(
 export async function startDockerAnalysis(
   imageName: string,
   scanType: ScanType = 'standard',
+  forceRescan = false,
 ): Promise<AnalysisSummaryAPI> {
   return apiFetch<AnalysisSummaryAPI>('/analyze', {
     method: 'POST',
@@ -212,6 +215,7 @@ export async function startDockerAnalysis(
       repo_url: imageName,
       scan_type: scanType,
       target_type: 'docker',
+      force_rescan: forceRescan,
     }),
   });
 }
@@ -508,6 +512,7 @@ export function analysisToScanResult(analysis: AnalysisDetailAPI): import('../pa
   return {
     target: analysis.repo_url,
     type: isDocker ? 'docker' : 'github',
+    scan_type: analysis.scan_type,
     score: score ?? 0,           // score 0 uniquement pour le composant circulaire
     status: mapScore(scoreRaw ?? null),
     stats,

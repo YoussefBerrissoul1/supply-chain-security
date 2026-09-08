@@ -32,6 +32,7 @@ export interface DockerConfig { ports: string[]; user: string; os: string; total
 export interface ScanResult {
   target: string;
   type: 'github' | 'docker';
+  scan_type?: string;               // 'standard' | 'deep' — retourné par le backend
   score: number;                    // 0 si scoreIsNull (ne pas afficher)
   scoreIsNull?: boolean;            // true si le score backend est null (FAILED/INCOMPLETE)
   status: 'ok' | 'warn' | 'danger';
@@ -655,7 +656,7 @@ function getTabs(type: 'github' | 'docker') {
   return ["Vue d'ensemble", 'Vulnérabilités', 'Dépendances', 'Recommandations IA', 'Rapport'] as const;
 }
 
-function ScanResults({ result, onReset }: { result: ScanResult; onReset: () => void }) {
+function ScanResults({ result, onReset, onRerun }: { result: ScanResult; onReset: () => void; onRerun: (forceRescan: boolean) => void }) {
   const tabs = getTabs(result.type);
   const [activeTab, setActiveTab] = useState<string>(tabs[0]);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
@@ -747,6 +748,20 @@ function ScanResults({ result, onReset }: { result: ScanResult; onReset: () => v
                 <span>⚡</span> Résultat depuis le cache (analyse de moins de 24h)
               </motion.div>
             )}
+            {/* Badge mode de scan */}
+            {result.scan_type && (
+              <motion.div
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border font-semibold ${
+                  result.scan_type === 'deep'
+                    ? 'text-[#1e40af] bg-[#dbeafe] border-[#1e40af]/20'
+                    : 'text-[#4b4e5c] bg-[#f1f5f9] border-[#4b4e5c]/20'
+                }`}
+              >
+                {result.scan_type === 'deep' ? '🔬 Scan Approfondi' : '⚡ Scan Standard'}
+              </motion.div>
+            )}
             {/* Coverage warning */}
             {coverageLow && (
               <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="inline-flex items-center gap-1.5 text-xs text-[#b45309] bg-[#fef3c7] px-2.5 py-1 rounded-full border border-[#b45309]/20">
@@ -756,6 +771,11 @@ function ScanResults({ result, onReset }: { result: ScanResult; onReset: () => v
           </div>
           <div className="md:ml-auto flex items-center gap-3">
             <button type="button" onClick={onReset} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-[#e4e7f0] text-sm text-[#4b4e5c] hover:border-[#12131a]/30 transition-all"><RefreshCw size={14} /> Nouvelle analyse</button>
+            {!result.isHistorical && (
+              <button type="button" onClick={() => onRerun(true)} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-[#c2410c]/40 text-sm text-[#c2410c] hover:bg-[#fff7ed] transition-all" title="Relancer ce scan en ignorant le cache">
+                <RefreshCw size={14} /> Relancer le scan
+              </button>
+            )}
             <button type="button" onClick={handleDownloadPdf} disabled={isGeneratingPdf} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-[#e4e7f0] text-sm text-[#4b4e5c] hover:border-[#12131a]/30 transition-all disabled:opacity-50">
               {isGeneratingPdf ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} {isGeneratingPdf ? 'Téléchargement...' : 'Rapport PDF'}
             </button>
@@ -816,8 +836,8 @@ function ScanResults({ result, onReset }: { result: ScanResult; onReset: () => v
                         <th className="text-left px-6 py-3 font-semibold text-[#12131a]">CVE ID</th>
                         <th className="text-left px-6 py-3 font-semibold text-[#12131a]">Sévérité</th>
                         <th className="text-left px-6 py-3 font-semibold text-[#12131a]">Paquet</th>
-
-                        <th className="text-right px-6 py-3 font-semibold text-[#12131a]">CVSS</th>
+                        <th className="text-left px-6 py-3 font-semibold text-[#12131a]">Description</th>
+                        <th className="text-right px-6 py-3 font-semibold text-[#12131a]">Score</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -840,6 +860,7 @@ function ScanResults({ result, onReset }: { result: ScanResult; onReset: () => v
                           </td>
                           <td className="px-6 py-4"><span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: `${severityColor(v.severity)}18`, color: severityColor(v.severity) }}>{v.severity}</span></td>
                           <td className="px-6 py-4 font-mono text-xs text-[#4b4e5c] max-w-[140px] truncate">{v.pkg}</td>
+                          <td className="px-6 py-4 text-sm text-[#4b4e5c] max-w-[420px] leading-snug line-clamp-3">{v.desc}</td>
                           <td className="px-6 py-4 text-right font-bold font-mono" style={{ color: severityColor(v.severity) }}>{v.score ? v.score.toFixed(1) : 'N/A'}</td>
                         </motion.tr>
                       ))}
@@ -1039,15 +1060,15 @@ export function ScanPage() {
     }
   }, []);
 
-  const handleStart = async (url: string, mode: ScanMode, type: InputType) => {
+  const handleStart = async (url: string, mode: ScanMode, type: InputType, forceRescan = false) => {
     setApiError(null);
     setIsSubmitting(true);
     try {
       let analysis;
       if (type === 'docker') {
-        analysis = await startDockerAnalysis(url);
+        analysis = await startDockerAnalysis(url, mode, forceRescan);
       } else {
-        analysis = await startGithubAnalysis(url, mode);
+        analysis = await startGithubAnalysis(url, mode, forceRescan);
       }
       setTarget(url);
       setInputType(type);
@@ -1115,6 +1136,13 @@ export function ScanPage() {
     setState('results');
   }, []);
 
+  // Relancer le même scan avec forceRescan=true (ignore le cache 24h)
+  const handleRerun = useCallback((forceRescan: boolean) => {
+    if (!result) return;
+    handleStart(result.target, (result.scan_type as ScanMode) ?? scanMode, result.type, forceRescan);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result, scanMode]);
+
   if (isRestoring) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#f7f8fb]">
@@ -1160,7 +1188,7 @@ export function ScanPage() {
 
       {state === 'results' && result && (
         <motion.div key={`results-${result.analysisId ?? 'new'}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-          <ScanResults result={result} onReset={handleReset} />
+          <ScanResults result={result} onReset={handleReset} onRerun={handleRerun} />
         </motion.div>
       )}
     </>

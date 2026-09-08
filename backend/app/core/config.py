@@ -53,10 +53,13 @@ class Settings(BaseSettings):
     # --- IA ---
     GEMINI_API_KEY: str = ""
     OPENROUTER_API_KEY: str = ""
-    # NVIDIA NIM : clé API pour Kimi K2.6 (fallback Gemini → NVIDIA → OpenRouter)
-    # Obtenir sur : https://integrate.api.nvidia.com
+    # NVIDIA NIM : conservé pour rétrocompatibilité (désactivé dans la chaîne active)
     # Format : nvapi-xxxxxxxxxxxxxxxxxxxx
     NVIDIA_API_KEY: str = ""
+    # Groq : fallback intermédiaire (Gemini → Groq → OpenRouter → Statique)
+    # Obtenir sur : https://console.groq.com/keys — 14 400 req/jour gratuit
+    # Format : gsk_xxxxxxxxxxxxxxxxxxxx
+    GROQ_API_KEY: str = ""
     AI_PROVIDER: str = "gemini"     # "gemini" ou "openrouter"
 
     # --- Cache analyses ---

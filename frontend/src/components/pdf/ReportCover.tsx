@@ -82,9 +82,9 @@ export function ReportCover({ data }: ReportCoverProps) {
             Évaluation des Risques <br />
             <span className="text-[#D1D5DB]">& Vulnérabilités</span>
           </h3>
-          <p className="text-base text-[#94A3B8] max-w-lg leading-relaxed font-medium">
+          {/* <p className="text-base text-[#94A3B8] max-w-lg leading-relaxed font-medium">
             Analyse automatisée de la posture de sécurité des dépôts GitHub, des dépendances logicielles et des images Docker avec détection des vulnérabilités et recommandations basées sur l'IA.
-          </p>
+          </p> */}
         </div>
 
         <div className="w-full h-px bg-[rgba(255,255,255,0.05)] mb-8"></div>

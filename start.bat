@@ -40,7 +40,7 @@ if errorlevel 1 (
 
 echo [1/3] Démarrage du Backend FastAPI (port 8000)...
 echo.
-start "NEXORA Backend" cmd /k "cd /d %~dp0backend && echo Activation du venv... && venv\Scripts\activate && echo Démarrage du serveur... && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000"
+start "NEXORA Backend" cmd /k "cd /d %~dp0backend && echo Activation du venv... && venv\Scripts\activate && echo Démarrage du serveur... && uvicorn app.main:app --reload --reload-exclude temp_repositories --reload-exclude reports --host 0.0.0.0 --port 8000"
 
 timeout /t 3 /nobreak >nul
 

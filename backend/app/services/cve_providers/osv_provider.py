@@ -322,7 +322,7 @@ class OSVProvider(BaseCVEProvider):
             if cached_score is not None:
                 if cached_score > 0.0:
                     result.cvss_score = cached_score
-                    result.severity = cvss_to_severity(cached_score)
+                    result.severity = __import__('app.services.cve_providers.models', fromlist=['cvss_to_severity']).cvss_to_severity(cached_score)
                 continue
 
             # Requête GET /vulns/{ghsa_id}
@@ -335,6 +335,7 @@ class OSVProvider(BaseCVEProvider):
             osv_cache.set(cache_key, ghsa_score)
 
             if ghsa_score > 0.0:
+                from app.services.cve_providers.models import cvss_to_severity
                 result.cvss_score = ghsa_score
                 result.severity = cvss_to_severity(ghsa_score)
                 logger.debug(
