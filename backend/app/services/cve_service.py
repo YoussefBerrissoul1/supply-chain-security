@@ -1,15 +1,18 @@
 """
 Service CVE — détecte les vulnérabilités dans les dépendances.
 
-Architecture Multi-Sources v3.0 (optimisée querybatch) :
-  1. OSV  /v1/querybatch  → 1 seule requête HTTP pour toutes les dépendances
-  2. GHSA (optionnel)     → enrichissement par dépendance en parallèle
-  3. NVD                  → enrichissement par CVE-ID en parallèle
+Architecture Multi-Sources v3.1 (optimisée querybatch) :
+  Mode standard : OSV /v1/querybatch uniquement (1 seule requête HTTP)
+  Mode deep     : OSV + GHSA + NVD + EPSS (FIRST.org) + GHSA-REST
+
+Règle de séparation standard / deep :
+  Standard = OSV uniquement → rapide, sans clé API, sans enrichissement NVD
+  Deep     = OSV + GHSA (si GITHUB_TOKEN) + NVD + EPSS + GHSA-REST
 
 Gains de performance vs v2.0 :
   - v2.0 : N requêtes HTTP vers OSV (1 par dépendance) en parallèle (3-5 workers)
-  - v3.0 : 1 requête HTTP vers OSV querybatch + enrichissement NVD parallèle
-  - Sur un repo de 50 deps : ~50 requêtes → 1 requête + N enrichissements NVD
+  - v3.1 : 1 requête HTTP vers OSV querybatch + enrichissement NVD/GHSA parallèle (deep only)
+  - Sur un repo de 50 deps en mode standard : ~50 requêtes → 1 requête
 """
 
 import logging
@@ -132,7 +135,7 @@ def scan_all_vulnerabilities(
     # ═══════════════════════════════════════════════════════════════════════════
     ghsa_results: dict[str, list[VulnerabilityResult]] = {}
 
-    if settings.GITHUB_TOKEN:
+    if scan_type == "deep" and settings.GITHUB_TOKEN:
         ghsa = GHSAProvider()
         logger.info("[CVE] Étape 2/3 — GHSA enrichissement (%d dépendances)", len(deps_to_scan))
 
@@ -161,8 +164,10 @@ def scan_all_vulnerabilities(
             time.monotonic() - t0,
             sum(1 for v in ghsa_results.values() if v)
         )
-    else:
+    elif scan_type == "deep" and not settings.GITHUB_TOKEN:
         logger.info("[CVE] Étape 2/3 — GHSA ignoré (GITHUB_TOKEN non défini)")
+    else:
+        logger.info("[CVE] Étape 2/3 — GHSA ignoré (mode standard)")
 
     # ═══════════════════════════════════════════════════════════════════════════
     # ÉTAPE 2b : Corrélation OSV + GHSA par dépendance
@@ -219,19 +224,10 @@ def scan_all_vulnerabilities(
             len(cve_to_enrich)
         )
     else:
-        # Mode standard : CVE avec score inconnu (0.0) + top 20 les plus sévères
-        # Objectif : garder l'essentiel tout en limitant les appels NVD (0.6s chacun)
-        unknown_score = [cve_id for cve_id, score in all_cve_scored_unique if score == 0.0]
-        known_scored  = sorted(
-            [(cve_id, score) for cve_id, score in all_cve_scored_unique if score > 0.0],
-            key=lambda x: x[1], reverse=True  # Du plus sévère au moins sévère
-        )
-        top_known = [cve_id for cve_id, _ in known_scored[:20]]  # Top 20 CVSS
-        cve_to_enrich = list(set(unknown_score + top_known))
+        cve_to_enrich = []
         logger.info(
-            "[CVE] Étape 3/3 — NVD enrichissement mode STANDARD : "
-            "%d CVE (score inconnu) + top 20 = %d total (sur %d)",
-            len(unknown_score), len(cve_to_enrich), len(all_cve_scored_unique)
+            "[CVE] Étape 3/3 — NVD ignoré (mode standard, %d CVE disponibles via OSV seul)",
+            len(all_cve_scored_unique)
         )
 
     if cve_to_enrich:

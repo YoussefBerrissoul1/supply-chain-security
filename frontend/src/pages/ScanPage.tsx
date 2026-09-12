@@ -6,6 +6,8 @@ import { RiskMatrix } from '@/components/RiskMatrix';
 import { ScanTimeline, buildTimelineSteps } from '@/components/ScanTimeline';
 import { AnimatedScore } from '@/components/AnimatedScore';
 import { generateReport } from '@/lib/pdf/generateReport';
+import { useLocation } from 'wouter';
+import { ApiError } from '@/lib/api';
 import {
   startGithubAnalysis,
   startDockerAnalysis,
@@ -1024,6 +1026,7 @@ export function ScanPage() {
   const [apiError, setApiError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRestoring, setIsRestoring] = useState(true);
+  const [, setLocation] = useLocation();
 
   useEffect(() => {
     const searchParams = new URLSearchParams(window.location.search);
@@ -1094,11 +1097,24 @@ export function ScanPage() {
       setState('running');
     } catch (err: any) {
       console.error(err);
-      if (err.message && err.message.includes('429')) {
-        setApiError("Limite de requêtes atteinte (Rate limit Github ou NVD). Veuillez patienter quelques instants.");
-      } else {
-        setApiError("Impossible de démarrer l'analyse. Vérifiez l'URL ou le tag Docker.");
+
+      if (err instanceof ApiError) {
+        if (err.status === 422) {
+          setApiError("URL GitHub ou tag Docker invalide. Vérifiez le format.");
+          return;
+        }
+        if (err.status === 429) {
+          setApiError("Limite de requêtes atteinte (rate limit GitHub/NVD). Patientez quelques instants.");
+          return;
+        }
+        const knownStatusPages = [400, 401, 403, 404, 408, 409, 410, 500, 502, 503, 504];
+        if (knownStatusPages.includes(err.status)) {
+          setLocation(`/${err.status}`);
+          return;
+        }
       }
+
+      setLocation('/503'); // erreur réseau pure (backend injoignable)
     } finally {
       setIsSubmitting(false);
     }

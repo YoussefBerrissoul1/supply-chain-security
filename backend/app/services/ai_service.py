@@ -1,10 +1,12 @@
 """
 Service IA — génère des recommandations de sécurité personnalisées pour une analyse.
-Stratégie de fallback (Gemini → Groq → OpenRouter → Statique) :
-  1. Gemini (principal — gemini-2.5-flash)
-  2. Groq (fallback intermédiaire — llama-3.3-70b-versatile, 14 400 req/jour gratuit)
-  3. OpenRouter (dernier fallback LLM)
-  4. Système expert statique (rule-based — toujours disponible)
+Stratégie de sélection du fournisseur IA :
+  1+2. Gemini + Groq en PARALLÈLE (le premier qui répond avec succès gagne)
+  3.   OpenRouter (dernier fallback LLM si Gemini et Groq échouent tous les deux)
+  4.   Système expert statique (rule-based — toujours disponible)
+
+Modèles Groq actifs : openai/gpt-oss-120b, qwen/qwen3.6-27b
+  (llama-3.3-70b-versatile décommissionné par Groq le 16 août 2026)
 
 L'IA NE participe PAS à la détection des CVE ni au Security Score (déterministe).
 Son rôle est uniquement l'interprétation et les recommandations.
@@ -14,6 +16,7 @@ import json
 import logging
 import time
 import httpx
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from google import genai
 from sqlalchemy.orm import Session
 
@@ -56,30 +59,39 @@ def generate_recommendations(
             "Obtenez une vraie clé sur https://aistudio.google.com/app/apikey"
         )
 
-    # ── Étape 1 : Gemini (fournisseur principal) ──────────────────────────────
-    if gemini_key_valid:
-        try:
-            recommendations_data = _generate_with_gemini(score_result, cve_results, repo_name, ecosystems, total_deps)
-            provider = "gemini"
-            logger.info("Recommandations générées avec succès via Gemini API (%d recs)", len(recommendations_data))
-        except Exception as e:
-            logger.error("Échec de la génération avec Gemini : %s", e)
-            recommendations_data = []
-    else:
-        logger.info("Gemini ignoré (clé absente ou invalide) — passage au fallback suivant")
+    # ── Étapes 1+2 : Gemini et Groq en parallèle (le premier qui réussit gagne) ──
+    parallel_jobs: dict = {}
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        if gemini_key_valid:
+            fut = executor.submit(
+                _generate_with_gemini, score_result, cve_results, repo_name, ecosystems, total_deps
+            )
+            parallel_jobs[fut] = "gemini"
+        else:
+            logger.info("Gemini ignoré (clé absente ou invalide)")
 
-    # ── Étape 2 : Groq (fallback intermédiaire) ───────────────────────────────
-    # Appelé uniquement si Gemini a échoué ou n'est pas configuré
-    if not recommendations_data and settings.GROQ_API_KEY:
-        try:
-            recommendations_data = _generate_with_groq(score_result, cve_results, repo_name, ecosystems, total_deps)
-            provider = "groq"
-            logger.info("Recommandations générées avec succès via Groq (%d recs)", len(recommendations_data))
-        except Exception as e:
-            logger.error("Échec de la génération avec Groq : %s", e)
-            recommendations_data = []
-    elif not recommendations_data and not settings.GROQ_API_KEY:
-        logger.info("Groq ignoré (GROQ_API_KEY absente) — passage à OpenRouter")
+        if settings.GROQ_API_KEY:
+            fut = executor.submit(
+                _generate_with_groq, score_result, cve_results, repo_name, ecosystems, total_deps
+            )
+            parallel_jobs[fut] = "groq"
+        else:
+            logger.info("Groq ignoré (GROQ_API_KEY absente)")
+
+        for future in as_completed(parallel_jobs):
+            provider_name = parallel_jobs[future]
+            try:
+                result = future.result()
+                if result:
+                    recommendations_data = result
+                    provider = provider_name
+                    logger.info(
+                        "Recommandations générées avec succès via %s (%d recs) — premier arrivé",
+                        provider_name, len(recommendations_data)
+                    )
+                    break  # on garde le premier succès
+            except Exception as e:
+                logger.error("Échec de la génération avec %s : %s", provider_name, e)
 
     # ── Étape 3 : OpenRouter (dernier fallback LLM) ───────────────────────────
     if not recommendations_data and settings.OPENROUTER_API_KEY:
@@ -555,8 +567,8 @@ def _generate_with_groq(
     }
 
     models_to_try = [
-        "llama-3.3-70b-versatile",
         "openai/gpt-oss-120b",
+        "qwen/qwen3.6-27b",
     ]
 
     last_error: Exception | None = None
@@ -577,7 +589,7 @@ def _generate_with_groq(
                         {"role": "user", "content": prompt},
                     ],
                     "temperature": 0.7,
-                    "max_tokens": 2000,
+                    "max_tokens": 3000,
                 }
 
                 with httpx.Client(timeout=TIMEOUT) as client:
@@ -707,7 +719,7 @@ def _generate_with_openrouter(
                         {"role": "user", "content": prompt}
                     ],
                     "temperature": 0.7,
-                    "max_tokens": 2000,
+                    "max_tokens": 3000,
                 }
 
                 with httpx.Client(timeout=60) as client:

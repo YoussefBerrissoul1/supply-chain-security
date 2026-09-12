@@ -285,62 +285,67 @@ class OSVProvider(BaseCVEProvider):
             )
             results.append(result)
 
-        # Enrichissement CVSS depuis les aliases GHSA pour les entrées sans score
-        # (les entrées PYSEC n'ont souvent pas de severity[] contrairement aux GHSA)
-        self._enrich_cvss_from_ghsa_aliases(results, vulns_data)
+        # Enrichissement CVSS + description depuis les aliases GHSA (ou l'ID lui-même si GHSA-*)
+        # (les entrées PYSEC n'ont souvent pas de severity[] ni de summary contrairement aux GHSA)
+        self._enrich_from_ghsa_aliases(results, vulns_data)
 
         return results
 
-    def _enrich_cvss_from_ghsa_aliases(
+    def _enrich_from_ghsa_aliases(
         self,
         results: list[VulnerabilityResult],
         vulns_data: list[dict],
     ) -> None:
         """
-        Pour les vulnérabilités avec cvss_score=0.0, tente de récupérer
-        le score CVSS depuis l'alias GHSA correspondant via GET /vulns/{ghsa_id}.
-
-        Raison : les entrées PYSEC dans OSV n'incluent souvent pas severity[],
-        alors que leur alias GHSA a toujours un score CVSS v3.
-
-        Les résultats sont écrits directement dans results (in-place).
+        Pour les vulnérabilités sans score (0.0) OU sans description
+        ("Aucune description OSV disponible."), tente de récupérer les deux
+        depuis GET /v1/vulns/{id} — via alias GHSA, ID GHSA, ou ID brut OSV (PYSEC-*, etc.).
         """
         OSV_VULN_URL = "https://api.osv.dev/v1/vulns/"
+        PLACEHOLDER_DESC = "Aucune description OSV disponible."
 
-        for i, (result, vuln_raw) in enumerate(zip(results, vulns_data)):
-            if result.cvss_score > 0.0:
-                continue  # Déjà un score valide
+        for result, vuln_raw in zip(results, vulns_data):
+            needs_score = result.cvss_score <= 0.0
+            needs_desc = not result.description or result.description == PLACEHOLDER_DESC
 
-            # Chercher un alias GHSA dans la vuln brute
+            if not needs_score and not needs_desc:
+                continue
+
+            # Déterminer l'ID à interroger : alias GHSA, ID GHSA, ou ID brut OSV (PYSEC-*, etc.)
             aliases = vuln_raw.get("aliases", [])
-            ghsa_id = next((a for a in aliases if a.startswith("GHSA-")), None)
-            if not ghsa_id:
+            fetch_id = next((a for a in aliases if a.startswith("GHSA-")), None)
+            if not fetch_id and result.cve_id.startswith("GHSA-"):
+                fetch_id = result.cve_id
+            if not fetch_id:
+                fetch_id = vuln_raw.get("id")
+            if not fetch_id or fetch_id == "UNKNOWN":
                 continue
 
-            cache_key = f"ghsa_cvss_{ghsa_id}"
-            cached_score = osv_cache.get(cache_key)
-            if cached_score is not None:
-                if cached_score > 0.0:
-                    result.cvss_score = cached_score
-                    result.severity = __import__('app.services.cve_providers.models', fromlist=['cvss_to_severity']).cvss_to_severity(cached_score)
-                continue
+            cache_key = f"osv_full_{fetch_id}"
+            cached = osv_cache.get(cache_key)
+            if cached is None:
+                vuln_full_data = http_get_with_retry(f"{OSV_VULN_URL}{fetch_id}")
+                if not vuln_full_data:
+                    osv_cache.set(cache_key, {"score": 0.0, "desc": ""})
+                    continue
+                cached = {
+                    "score": self._extract_cvss(vuln_full_data),
+                    "desc": vuln_full_data.get("summary") or vuln_full_data.get("details", ""),
+                }
+                osv_cache.set(cache_key, cached)
 
-            # Requête GET /vulns/{ghsa_id}
-            ghsa_data = http_get_with_retry(f"{OSV_VULN_URL}{ghsa_id}")
-            if not ghsa_data:
-                osv_cache.set(cache_key, 0.0)
-                continue
-
-            ghsa_score = self._extract_cvss(ghsa_data)
-            osv_cache.set(cache_key, ghsa_score)
-
-            if ghsa_score > 0.0:
+            if needs_score and cached["score"] > 0.0:
                 from app.services.cve_providers.models import cvss_to_severity
-                result.cvss_score = ghsa_score
-                result.severity = cvss_to_severity(ghsa_score)
+                result.cvss_score = cached["score"]
+                result.severity = cvss_to_severity(cached["score"])
+
+            if needs_desc and cached["desc"]:
+                result.description = cached["desc"]
+
+            if needs_score or needs_desc:
                 logger.debug(
-                    "[OSV CVSS fallback] %s : score enrichi depuis %s → %.1f",
-                    result.cve_id, ghsa_id, ghsa_score
+                    "[OSV enrichissement] %s : backfill depuis %s (score=%s, desc=%s)",
+                    result.cve_id, fetch_id, needs_score, needs_desc
                 )
 
     def _extract_cve_id(self, vuln: dict) -> str:
